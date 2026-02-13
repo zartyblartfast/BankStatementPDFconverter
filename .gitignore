@@ -1,0 +1,24 @@
+# Sensitive / large files — bank statement PDFs
+StatementsPDF/*.pdf
+
+# Parser output exports
+finance/exports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store

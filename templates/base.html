@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Ledger Dashboard{% endblock %}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+         background:#0f172a; color:#e2e8f0; min-height:100vh; }
+
+  /* ── nav ── */
+  nav { background:#1e293b; padding:12px 24px; display:flex; align-items:center; gap:24px;
+        border-bottom:1px solid #334155; }
+  nav .brand { font-size:1.1rem; font-weight:700; color:#f8fafc; text-decoration:none; }
+  nav a { color:#94a3b8; text-decoration:none; font-size:0.9rem; padding:4px 12px;
+          border-radius:6px; transition:all 0.15s; }
+  nav a:hover, nav a.active { color:#e2e8f0; background:#334155; }
+  nav .badge { display:inline-block; background:#f59e0b; color:#000; font-size:0.7rem;
+               font-weight:700; padding:1px 6px; border-radius:8px; margin-left:4px;
+               vertical-align:middle; }
+  nav .badge-ok { background:#22c55e; color:#fff; }
+
+  /* ── main ── */
+  .container { max-width:1200px; padding:24px; }
+  h1 { font-size:1.4rem; margin-bottom:4px; color:#f8fafc; }
+  h2 { font-size:1.1rem; margin-bottom:8px; color:#f8fafc; }
+  .subtitle { color:#94a3b8; font-size:0.85rem; margin-bottom:20px; }
+
+  /* ── cards ── */
+  .card { background:#1e293b; border-radius:12px; padding:20px; margin-bottom:20px; }
+  .card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+               gap:16px; margin-bottom:24px; }
+  .stat-card { background:#1e293b; border-radius:12px; padding:20px; text-align:center; }
+  .stat-card .value { font-size:2rem; font-weight:700; }
+  .stat-card .label { color:#94a3b8; font-size:0.8rem; margin-top:4px; }
+  .green { color:#22c55e; }
+  .red { color:#ef4444; }
+  .amber { color:#f59e0b; }
+  .muted { color:#94a3b8; }
+
+  /* ── buttons ── */
+  .btn { display:inline-block; padding:8px 20px; border:none; border-radius:8px;
+         font-size:0.9rem; font-weight:600; cursor:pointer; text-decoration:none;
+         transition:all 0.15s; }
+  .btn-primary { background:#3b82f6; color:#fff; }
+  .btn-primary:hover { background:#2563eb; }
+  .btn-success { background:#22c55e; color:#fff; }
+  .btn-success:hover { background:#16a34a; }
+  .btn-sm { padding:4px 12px; font-size:0.8rem; }
+
+  /* ── tables ── */
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; padding:8px 12px; color:#94a3b8; font-weight:500; font-size:0.85rem;
+       border-bottom:1px solid #334155; }
+  td { padding:8px 12px; font-size:0.85rem; border-bottom:1px solid #1e293b; }
+  tr:hover { background:#334155; }
+  th.right, td.right { text-align:right; }
+
+  /* ── forms ── */
+  select, input[type="text"] { background:#334155; color:#e2e8f0; border:1px solid #475569;
+         border-radius:6px; padding:6px 10px; font-size:0.85rem; }
+  select:focus, input:focus { outline:none; border-color:#60a5fa; }
+
+  /* ── alerts ── */
+  .alert { padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:0.9rem; }
+  .alert-success { background:#052e16; border:1px solid #166534; color:#4ade80; }
+  .alert-error { background:#450a0a; border:1px solid #991b1b; color:#fca5a5; }
+  .alert-info { background:#0c1a3d; border:1px solid #1e40af; color:#93c5fd; }
+
+  /* ── flash messages ── */
+  .flash { padding:10px 16px; border-radius:8px; margin-bottom:12px; font-size:0.85rem; }
+  .flash-success { background:#052e16; border:1px solid #166534; color:#4ade80; }
+  .flash-error { background:#450a0a; border:1px solid #991b1b; color:#fca5a5; }
+</style>
+{% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand">Ledger Dashboard</a>
+  <a href="/ingest" class="{% if active_page == 'ingest' %}active{% endif %}">Ingest PDF</a>
+  <a href="/exceptions" class="{% if active_page == 'exceptions' %}active{% endif %}">
+    Exceptions
+    {% if exception_count and exception_count > 0 %}
+      <span class="badge">{{ exception_count }}</span>
+    {% else %}
+      <span class="badge badge-ok">✓</span>
+    {% endif %}
+  </a>
+  <a href="/report" class="{% if active_page == 'report' %}active{% endif %}">Report</a>
+</nav>
+
+<div class="container">
+  {% for cat, msg in get_flashed_messages(with_categories=true) %}
+    <div class="flash flash-{{ cat }}">{{ msg }}</div>
+  {% endfor %}
+
+  {% block content %}{% endblock %}
+</div>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>

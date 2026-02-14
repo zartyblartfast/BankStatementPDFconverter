@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Report — Ledger Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .report-frame { width:100%; border:none; border-radius:12px;
+                  background:#0f172a; min-height:calc(100vh - 120px); }
+</style>
+{% endblock %}
+
+{% block content %}
+<iframe class="report-frame" src="/report/raw" id="reportFrame"></iframe>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-resize iframe to content height
+const frame = document.getElementById('reportFrame');
+frame.addEventListener('load', () => {
+  try {
+    frame.style.height = frame.contentDocument.body.scrollHeight + 40 + 'px';
+  } catch(e) {}
+});
+</script>
+{% endblock %}

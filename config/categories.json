@@ -1,0 +1,89 @@
+{
+  "Income": [
+    "Salary",
+    "Pension",
+    "State Pension / DWP",
+    "Rent Received",
+    "Refunds / Reimbursements",
+    "Transfers In"
+  ],
+  "Housing & Utilities": [
+    "Council Tax",
+    "Electricity / Gas",
+    "Water",
+    "Internet / Phone",
+    "Home Insurance",
+    "Appliance Cover",
+    "Cleaning / Housecare"
+  ],
+  "Food & Groceries": [
+    "Groceries",
+    "Petrol",
+    "Takeaway / Cafes / Pubs / Restaurants",
+    "Pubs"
+  ],
+  "Transport": [
+    "Car / Motoring",
+    "Travel",
+    "Parking",
+    "Tolls",
+    "Travel Insurance"
+  ],
+  "Tech": [
+    "Devices / Adapters / Cables",
+    "Software / Apps",
+    "VPN / Security",
+    "Hosting / Domains",
+    "AI / Dev Tools",
+    "Subscriptions",
+    "Cloud Storage",
+    "ESIM"
+  ],
+  "Finance": [
+    "Credit Card Payments",
+    "Bank Fees",
+    "Loan Repayment",
+    "Other Finance"
+  ],
+  "Crypto": [
+    "Crypto Exchange",
+    "Crypto Transfer"
+  ],
+  "Personal / Misc": [
+    "Cleaning",
+    "Garden / House",
+    "Gifts / Charity / Political",
+    "Cash Withdrawals",
+    "Health / Medical",
+    "Clothing / Personal",
+    "Entertainment",
+    "Other",
+    "Unknown"
+  ],
+  "Isle of Man / Plan B": [
+    "Accommodation",
+    "Transport",
+    "Documents",
+    "Professional Advice"
+  ],
+  "Bodge / Pet": [
+    "Food / General",
+    "Boarding / Sitting",
+    "Grooming",
+    "Vet"
+  ],
+  "Health": [
+    "Supplements",
+    "Other"
+  ],
+  "Giving / Political": [
+    "Charity",
+    "Subscriptions",
+    "Crowdfunding",
+    "Donation",
+    "Other"
+  ],
+  "PayPal": [
+    "Uncategorised"
+  ]
+}

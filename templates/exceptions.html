@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Exceptions — Ledger Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .exc-row { transition: opacity 0.3s; }
+  .exc-row.resolved { opacity:0.4; }
+  .exc-form { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .exc-form select { min-width:140px; }
+  .remember-label { display:flex; align-items:center; gap:4px; font-size:0.8rem; color:#94a3b8;
+                     cursor:pointer; }
+  .remember-label input { accent-color:#f59e0b; cursor:pointer; }
+  .exc-merchant { color:#e2e8f0; font-weight:500; }
+  .exc-desc { color:#64748b; font-size:0.8rem; max-width:300px; overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; }
+  .bulk-banner { background:#1e3a5f; border:1px solid #1e40af; border-radius:8px;
+                 padding:10px 16px; margin-bottom:12px; font-size:0.85rem; color:#93c5fd;
+                 display:flex; align-items:center; justify-content:space-between; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Exceptions</h1>
+<p class="subtitle">Transactions that need manual category assignment</p>
+
+{% if exceptions %}
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Merchant</th>
+        <th>Description</th>
+        <th class="right">Amount</th>
+        <th>Category</th>
+        <th>Subcategory</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for exc in exceptions %}
+      <tr class="exc-row" id="exc-{{ exc.exception_id }}" data-merchant="{{ exc.merchant_core }}">
+        <td class="muted">{{ exc.txn_date }}</td>
+        <td class="exc-merchant">{{ exc.merchant_core }}</td>
+        <td class="exc-desc" title="{{ exc.description_raw }}">{{ exc.description_raw }}</td>
+        <td class="right" style="color:{{ '#22c55e' if exc.amount > 0 else '#ef4444' }}">
+          £{{ '%.2f'|format(exc.amount|abs) }}
+        </td>
+        <td>
+          <select class="cat-select" data-exc="{{ exc.exception_id }}">
+            <option value="">— Select —</option>
+            {% for cat in categories %}
+              <option value="{{ cat }}">{{ cat }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td>
+          <select class="sub-select" data-exc="{{ exc.exception_id }}" disabled>
+            <option value="">— Select —</option>
+          </select>
+        </td>
+        <td>
+          <div class="exc-form">
+            <label class="remember-label">
+              <input type="checkbox" class="remember-cb" data-exc="{{ exc.exception_id }}" checked>
+              Remember
+            </label>
+            <button class="btn btn-success btn-sm apply-btn" data-exc="{{ exc.exception_id }}" disabled>
+              Apply
+            </button>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="text-align:center; padding:40px;">
+  <div style="font-size:2rem; margin-bottom:8px;">✓</div>
+  <div style="color:#22c55e; font-size:1.1rem; font-weight:600;">All Clear</div>
+  <div class="muted" style="margin-top:4px;">No open exceptions</div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Category tree for populating subcategory dropdowns
+const CAT_TREE = {{ cat_tree|tojson }};
+
+// When category changes, populate subcategories
+document.querySelectorAll('.cat-select').forEach(sel => {
+  sel.addEventListener('change', () => {
+    const excId = sel.dataset.exc;
+    const subSel = document.querySelector(`.sub-select[data-exc="${excId}"]`);
+    const applyBtn = document.querySelector(`.apply-btn[data-exc="${excId}"]`);
+    subSel.innerHTML = '<option value="">— Select —</option>';
+
+    const cat = sel.value;
+    if (cat && CAT_TREE[cat]) {
+      CAT_TREE[cat].forEach(sub => {
+        const o = document.createElement('option');
+        o.value = sub; o.textContent = sub;
+        subSel.appendChild(o);
+      });
+      subSel.disabled = false;
+    } else {
+      subSel.disabled = true;
+      applyBtn.disabled = true;
+    }
+  });
+});
+
+// Enable Apply when subcategory selected
+document.querySelectorAll('.sub-select').forEach(sel => {
+  sel.addEventListener('change', () => {
+    const excId = sel.dataset.exc;
+    const applyBtn = document.querySelector(`.apply-btn[data-exc="${excId}"]`);
+    applyBtn.disabled = !sel.value;
+  });
+});
+
+// Apply button handler
+document.querySelectorAll('.apply-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const excId = btn.dataset.exc;
+    const row = document.getElementById('exc-' + excId);
+    const cat = document.querySelector(`.cat-select[data-exc="${excId}"]`).value;
+    const sub = document.querySelector(`.sub-select[data-exc="${excId}"]`).value;
+    const remember = document.querySelector(`.remember-cb[data-exc="${excId}"]`).checked;
+    const merchant = row.dataset.merchant;
+
+    if (!cat || !sub) return;
+
+    btn.disabled = true;
+    btn.textContent = '…';
+
+    try {
+      const resp = await fetch('/api/resolve-exception', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          exception_id: parseInt(excId),
+          category: cat,
+          subcategory: sub,
+          remember_rule: remember,
+          merchant_core: merchant,
+        }),
+      });
+      const data = await resp.json();
+
+      if (data.ok) {
+        row.classList.add('resolved');
+        btn.textContent = '✓ Done';
+        btn.className = 'btn btn-sm';
+        btn.style.color = '#22c55e';
+
+        // If bulk resolved, mark other rows with same merchant
+        if (data.bulk_resolved && data.bulk_resolved.length > 0) {
+          data.bulk_resolved.forEach(id => {
+            const otherRow = document.getElementById('exc-' + id);
+            if (otherRow) {
+              otherRow.classList.add('resolved');
+              const otherBtn = otherRow.querySelector('.apply-btn');
+              if (otherBtn) { otherBtn.textContent = '✓ Done'; otherBtn.className = 'btn btn-sm'; otherBtn.style.color = '#22c55e'; }
+            }
+          });
+        }
+
+        // Update nav badge
+        const badge = document.querySelector('nav .badge');
+        if (badge) {
+          const remaining = document.querySelectorAll('.exc-row:not(.resolved)').length;
+          if (remaining === 0) {
+            badge.className = 'badge badge-ok';
+            badge.textContent = '✓';
+          } else {
+            badge.textContent = remaining;
+          }
+        }
+      } else {
+        btn.textContent = 'Error';
+        btn.style.color = '#ef4444';
+        alert(data.error || 'Failed to resolve exception');
+      }
+    } catch(e) {
+      btn.textContent = 'Error';
+      btn.style.color = '#ef4444';
+    }
+  });
+});
+</script>
+{% endblock %}

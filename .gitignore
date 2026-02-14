@@ -4,6 +4,14 @@ StatementsPDF/*.pdf
 # Parser output exports
 finance/exports/
 
+# Ledger database (contains personal financial data)
+finance/ledger.db
+finance/ledger.db-wal
+finance/ledger.db-shm
+
+# Generated reports
+finance/reports/
+
 # Python
 __pycache__/
 *.pyc

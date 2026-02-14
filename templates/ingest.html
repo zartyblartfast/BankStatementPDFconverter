@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Ingest PDF — Ledger Dashboard{% endblock %}
+
+{% block content %}
+<h1>Ingest Bank Statement PDF</h1>
+<p class="subtitle">Select a PDF from your StatementsPDF folder to process</p>
+
+<div class="card">
+  <h2>Available PDFs</h2>
+  <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:12px;">
+    Place your PDF in the <code style="background:#334155;padding:2px 6px;border-radius:4px;">StatementsPDF/</code> folder, then select it below.
+  </p>
+
+  {% if pdfs %}
+  <form method="POST" action="/ingest" id="ingestForm">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:30px;"></th>
+          <th>Filename</th>
+          <th class="right">Size</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for pdf in pdfs %}
+        <tr>
+          <td><input type="radio" name="pdf" value="{{ pdf.path }}" {{ 'checked' if loop.first }}></td>
+          <td>{{ pdf.name }}</td>
+          <td class="right muted">{{ pdf.size_kb }} KB</td>
+          <td>
+            {% if pdf.imported %}
+              <span style="color:#f59e0b;">● Imported ({{ pdf.txn_count }} txns)</span>
+            {% else %}
+              <span class="muted">○ Not imported</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:16px;">
+      <button type="submit" class="btn btn-primary" id="processBtn">Process Selected PDF</button>
+      <span id="spinner" style="display:none; margin-left:12px; color:#94a3b8;">
+        ⏳ Processing… this may take a few seconds
+      </span>
+    </div>
+  </form>
+  {% else %}
+  <div class="alert alert-info">
+    No PDFs found in <code>StatementsPDF/</code>. Please add a bank statement PDF and refresh.
+  </div>
+  {% endif %}
+</div>
+
+{% if result %}
+<div class="card">
+  <h2>Ingestion Result</h2>
+
+  {% if result.error %}
+    <div class="alert alert-error">{{ result.error }}</div>
+  {% else %}
+    <div class="alert alert-success">
+      Successfully processed <strong>{{ result.pdf_path }}</strong>
+    </div>
+  {% endif %}
+
+  <div class="card-grid" style="margin-top:16px;">
+    <div class="stat-card">
+      <div class="value">{{ result.extracted }}</div>
+      <div class="label">Extracted</div>
+    </div>
+    <div class="stat-card">
+      <div class="value green">{{ result.categorised }}</div>
+      <div class="label">Categorised</div>
+    </div>
+    <div class="stat-card">
+      <div class="value {{ 'amber' if result.uncategorised > 0 else 'green' }}">{{ result.uncategorised }}</div>
+      <div class="label">Uncategorised</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">{{ result.imported_new }}</div>
+      <div class="label">Imported</div>
+    </div>
+    {% if result.imported_replaced > 0 %}
+    <div class="stat-card">
+      <div class="value muted">{{ result.imported_replaced }}</div>
+      <div class="label">Replaced (dedup)</div>
+    </div>
+    {% endif %}
+    {% if result.exceptions_created > 0 %}
+    <div class="stat-card">
+      <div class="value amber">{{ result.exceptions_created }}</div>
+      <div class="label">Exceptions</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if result.exceptions_created > 0 %}
+  <div class="alert alert-info" style="margin-top:12px;">
+    {{ result.exceptions_created }} transaction{{ 's' if result.exceptions_created != 1 else '' }}
+    could not be categorised.
+    <a href="/exceptions" style="color:#60a5fa;">Review exceptions →</a>
+  </div>
+  {% endif %}
+
+  {% if result.warnings %}
+  <details style="margin-top:12px;">
+    <summary style="cursor:pointer; color:#94a3b8; font-size:0.85rem;">
+      {{ result.warnings|length }} parse warning{{ 's' if result.warnings|length != 1 else '' }}
+    </summary>
+    <pre style="background:#1e293b; padding:12px; border-radius:8px; margin-top:8px;
+                font-size:0.75rem; color:#94a3b8; overflow-x:auto; max-height:200px;">{% for w in result.warnings %}{{ w }}
+{% endfor %}</pre>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('ingestForm')?.addEventListener('submit', function() {
+  document.getElementById('processBtn').disabled = true;
+  document.getElementById('spinner').style.display = 'inline';
+});
+</script>
+{% endblock %}

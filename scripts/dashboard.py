@@ -27,6 +27,15 @@ app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
 app.secret_key = "ledger-dashboard-local-dev"
 
 
+@app.after_request
+def add_cors_headers(response):
+    """Allow API calls from any local origin (file://, localhost, 127.0.0.1, proxy)."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
+
 # ── Helpers ──
 
 def _get_db() -> sqlite3.Connection:

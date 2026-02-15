@@ -86,7 +86,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .subtitle {{ color:#94a3b8; font-size:0.9rem; margin-bottom:16px; }}
   /* ── date picker ── */
   .date-bar {{ display:flex; align-items:center; gap:12px; margin-bottom:20px;
-               max-width:1200px; background:#1e293b; border-radius:10px; padding:12px 20px; }}
+               max-width:1600px; background:#1e293b; border-radius:10px; padding:12px 20px; }}
   .date-bar label {{ color:#94a3b8; font-size:0.85rem; }}
   .date-bar select {{ background:#334155; color:#e2e8f0; border:1px solid #475569;
                       border-radius:6px; padding:5px 10px; font-size:0.85rem;
@@ -102,7 +102,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .item-row.excluded-item .excluded-tag {{ text-decoration:none; opacity:1; }}
   /* ── donut row ── */
   .donut-row {{ display:flex; align-items:center; justify-content:center; gap:0;
-                max-width:1200px; margin-bottom:24px; }}
+                max-width:1600px; margin-bottom:24px; }}
   .donut-cell {{ background:#1e293b; border-radius:12px; padding:20px; flex:1;
                  position:relative; min-height:280px; display:flex; flex-direction:column;
                  align-items:center; }}
@@ -118,13 +118,16 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .net-pill .lbl {{ font-size:0.75rem; color:#94a3b8; margin-bottom:4px; }}
   .net-pill .amt {{ font-size:1.4rem; font-weight:700; }}
   /* ── summary cards ── */
-  .summary-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:24px; max-width:1200px; }}
+  .summary-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:24px; max-width:1600px; }}
   .summary-card {{ background:#1e293b; border-radius:12px; padding:20px; }}
   .summary-card h2 {{ font-size:1.1rem; margin-bottom:4px; }}
   .summary-card .total {{ font-size:1.8rem; font-weight:700; margin-bottom:12px; }}
   .income-total {{ color:#22c55e; }}
   .expense-total {{ color:#ef4444; }}
-  table {{ width:100%; border-collapse:collapse; margin-top:8px; }}
+  table {{ width:100%; border-collapse:collapse; margin-top:8px; table-layout:fixed; }}
+  table col.col-cat {{ width:70%; }}
+  table col.col-amt {{ width:15%; }}
+  table col.col-pct {{ width:15%; }}
   thead th {{ text-align:left; padding:6px 12px; color:#94a3b8; font-weight:500;
               font-size:0.85rem; border-bottom:1px solid #334155; }}
   thead th:nth-child(2), thead th:nth-child(3) {{ text-align:right; }}
@@ -146,7 +149,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .sort-btn.active {{ background:#475569; color:#e2e8f0; }}
   .sort-btn:hover {{ background:#475569; }}
   /* ── net bar ── */
-  .net-bar {{ max-width:1200px; background:#1e293b; border-radius:12px; padding:20px;
+  .net-bar {{ max-width:1600px; background:#1e293b; border-radius:12px; padding:20px;
               margin-top:24px; text-align:center; }}
   .net-bar .label {{ color:#94a3b8; font-size:0.9rem; }}
   .net-bar .value {{ font-size:2rem; font-weight:700; }}
@@ -165,9 +168,12 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .note-inline input {{ background:#334155; color:#f59e0b; border:1px solid #475569; font-style:italic;
                         border-radius:4px; padding:2px 6px; font-size:0.75rem; width:180px; }}
   .note-inline input:focus {{ outline:none; border-color:#f59e0b; }}
-  .note-inline button {{ background:#334155; border:none; color:#94a3b8; cursor:pointer;
-                         font-size:0.7rem; padding:2px 6px; border-radius:4px; }}
-  .note-inline button:hover {{ color:#e2e8f0; }}
+  .note-inline button {{ background:#334155; border:1px solid #475569; color:#e2e8f0; cursor:pointer;
+                         font-size:0.85rem; padding:4px 8px; border-radius:4px; line-height:1; }}
+  .note-inline .note-save {{ color:#4ade80; }}
+  .note-inline .note-save:hover {{ background:#14532d; }}
+  .note-inline .note-cancel {{ color:#f87171; }}
+  .note-inline .note-cancel:hover {{ background:#7f1d1d; }}
   /* ── modal ── */
   .modal-overlay {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
                     z-index:1000; align-items:center; justify-content:center; }}
@@ -244,6 +250,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
     <h2>Income</h2>
     <div class="total income-total" id="incomeTotalEl"></div>
     <table>
+      <colgroup><col class="col-cat"><col class="col-amt"><col class="col-pct"></colgroup>
       <thead><tr><th>Category</th><th>Amount</th><th>Share</th></tr></thead>
       <tbody id="incomeBody"></tbody>
     </table>
@@ -252,6 +259,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
     <h2>Expenditure</h2>
     <div class="total expense-total" id="expenseTotalEl"></div>
     <table>
+      <colgroup><col class="col-cat"><col class="col-amt"><col class="col-pct"></colgroup>
       <thead><tr><th>Category</th><th>Amount</th><th>Share</th></tr></thead>
       <tbody id="expenseBody"></tbody>
     </table>
@@ -264,6 +272,9 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 </div>
 
 <script>
+// ── API base URL (works from file://, iframe, proxy, or direct) ──
+const API_BASE = (window.location.protocol === 'file:') ? 'http://127.0.0.1:5000' : '';
+
 // ── DATA ──
 const ALL_TXNS   = {txns_json};
 const ALL_MONTHS = {months_json};
@@ -667,7 +678,7 @@ let _rcTxnId = null;
 async function loadCatTree() {{
   if (_catTree) return _catTree;
   try {{
-    const r = await fetch('/api/categories');
+    const r = await fetch(API_BASE + '/api/categories');
     _catTree = await r.json();
   }} catch(e) {{ _catTree = {{tree:{{}}, id_map:{{}}}}; }}
   return _catTree;
@@ -758,7 +769,7 @@ async function saveRecat() {{
   }};
 
   try {{
-    const r = await fetch('/api/recategorize', {{
+    const r = await fetch(API_BASE + '/api/recategorize', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body)
@@ -814,10 +825,12 @@ function openNoteEditor(noteBtn) {{
   inp.type = 'text'; inp.value = current; inp.placeholder = 'Add note\u2026';
   inp.maxLength = 120;
   const saveBtn = document.createElement('button');
-  saveBtn.textContent = '\u2713';
-  saveBtn.title = 'Save';
+  saveBtn.textContent = 'Save';
+  saveBtn.className = 'note-save';
+  saveBtn.title = 'Save note';
   const cancelBtn = document.createElement('button');
-  cancelBtn.textContent = '\u2717';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.className = 'note-cancel';
   cancelBtn.title = 'Cancel';
   wrap.appendChild(inp);
   wrap.appendChild(saveBtn);
@@ -828,7 +841,7 @@ function openNoteEditor(noteBtn) {{
   async function save() {{
     const note = inp.value.trim();
     try {{
-      const r = await fetch('/api/update-note', {{
+      const r = await fetch(API_BASE + '/api/update-note', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{txn_id: parseInt(txnId), note: note}})
@@ -851,9 +864,13 @@ function openNoteEditor(noteBtn) {{
           if (editB) editB.before(tag);
         }}
         wrap.remove();
+      }} else {{
+        inp.style.borderColor = '#ef4444';
+        inp.value = data.error || 'Save failed';
       }}
     }} catch(err) {{
       inp.style.borderColor = '#ef4444';
+      inp.value = 'Network error: ' + err.message;
     }}
   }}
 

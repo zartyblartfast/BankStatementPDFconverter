@@ -93,6 +93,26 @@ CREATE TABLE IF NOT EXISTS exceptions (
 );
 CREATE INDEX IF NOT EXISTS IX_exceptions_status
     ON exceptions (status);
+
+-- Edit log — audit trail for category re-assignments
+CREATE TABLE IF NOT EXISTS edit_log (
+    edit_id         INTEGER PRIMARY KEY,
+    txn_id          INTEGER NOT NULL,
+    field_changed   TEXT NOT NULL,          -- e.g. 'subcategory_id'
+    old_value       TEXT,
+    new_value       TEXT,
+    old_category    TEXT,                   -- human-readable: "Finance / Other Finance"
+    new_category    TEXT,                   -- human-readable: "Transport / Car Insurance"
+    merchant_core   TEXT,
+    scope           TEXT NOT NULL DEFAULT 'single',  -- 'single' | 'merchant'
+    changed_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    CONSTRAINT FK_edit_log_txn
+        FOREIGN KEY (txn_id) REFERENCES transactions (txn_id)
+);
+CREATE INDEX IF NOT EXISTS IX_edit_log_txn
+    ON edit_log (txn_id);
+CREATE INDEX IF NOT EXISTS IX_edit_log_changed
+    ON edit_log (changed_at);
 """
 
 

@@ -39,7 +39,8 @@ def _query_all() -> tuple[list[dict], list[str]]:
     """
     conn = _connect()
     rows = conn.execute("""
-        SELECT t.txn_date        AS date,
+        SELECT t.txn_id,
+               t.txn_date        AS date,
                substr(t.txn_date, 1, 7) AS month,
                t.amount,
                t.merchant_core   AS merchant,
@@ -150,6 +151,44 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .net-bar .value {{ font-size:2rem; font-weight:700; }}
   .net-positive {{ color:#22c55e; }}
   .net-negative {{ color:#ef4444; }}
+  /* ── edit button ── */
+  .edit-btn {{ background:none; border:none; color:#475569; cursor:pointer; font-size:0.75rem;
+               padding:2px 6px; border-radius:4px; opacity:0.5; transition:opacity 0.15s; }}
+  .edit-btn:hover {{ opacity:1; color:#60a5fa; }}
+  /* ── modal ── */
+  .modal-overlay {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
+                    z-index:1000; align-items:center; justify-content:center; }}
+  .modal-overlay.active {{ display:flex; }}
+  .modal {{ background:#1e293b; border-radius:12px; padding:24px; width:440px; max-width:90vw;
+            box-shadow:0 20px 60px rgba(0,0,0,0.5); }}
+  .modal h3 {{ font-size:1rem; margin-bottom:16px; color:#f8fafc; }}
+  .modal-info {{ color:#94a3b8; font-size:0.82rem; margin-bottom:16px;
+                 background:#0f172a; padding:10px 14px; border-radius:8px; }}
+  .modal-info .mi-label {{ color:#64748b; font-size:0.75rem; }}
+  .modal-info .mi-val {{ color:#e2e8f0; }}
+  .modal label {{ display:block; color:#94a3b8; font-size:0.82rem; margin-bottom:4px; margin-top:12px; }}
+  .modal select, .modal input[type=text] {{
+    width:100%; background:#334155; color:#e2e8f0; border:1px solid #475569;
+    border-radius:6px; padding:7px 10px; font-size:0.85rem; }}
+  .modal select:focus, .modal input:focus {{ outline:none; border-color:#60a5fa; }}
+  .modal .scope-row {{ display:flex; gap:12px; margin-top:12px; }}
+  .modal .scope-opt {{ display:flex; align-items:center; gap:6px; color:#94a3b8;
+                       font-size:0.82rem; cursor:pointer; }}
+  .modal .scope-opt input {{ accent-color:#60a5fa; }}
+  .modal .remember-row {{ margin-top:12px; display:flex; align-items:center; gap:6px;
+                          color:#94a3b8; font-size:0.82rem; cursor:pointer; }}
+  .modal .remember-row input {{ accent-color:#f59e0b; }}
+  .modal-actions {{ margin-top:20px; display:flex; gap:10px; justify-content:flex-end; }}
+  .modal-actions button {{ padding:8px 18px; border-radius:6px; border:none;
+                           font-size:0.85rem; cursor:pointer; }}
+  .btn-cancel {{ background:#334155; color:#94a3b8; }}
+  .btn-cancel:hover {{ background:#475569; }}
+  .btn-save {{ background:#2563eb; color:#fff; }}
+  .btn-save:hover {{ background:#1d4ed8; }}
+  .btn-save:disabled {{ opacity:0.4; cursor:not-allowed; }}
+  .modal .status-msg {{ margin-top:10px; font-size:0.82rem; padding:6px 10px; border-radius:6px; }}
+  .status-ok {{ background:#14532d; color:#4ade80; }}
+  .status-err {{ background:#7f1d1d; color:#fca5a5; }}
 </style>
 </head>
 <body>
@@ -295,7 +334,8 @@ function render() {{
 
     // items
     if (!subItems[key]) subItems[key] = [];
-    subItems[key].push({{date: t.date, amount: t.amount, merchant: t.merchant,
+    subItems[key].push({{txn_id: t.txn_id, date: t.date, amount: t.amount, merchant: t.merchant,
+                         category: c, subcategory: s,
                          excluded: t.excluded, exclude_reason: t.exclude_reason}});
   }});
 
@@ -528,8 +568,9 @@ function renderItemRows(tbody, subRow) {{
     tr.dataset.subparent = sk;
     const sign = item.amount < 0 ? '-' : '';
     const exTag = item.excluded ? `<span class="excluded-tag" title="${{esc(item.exclude_reason||'')}}">EXCLUDED</span>` : '';
+    const editBtn = `<button class="edit-btn" title="Re-categorise" data-txnid="${{item.txn_id}}" data-merchant="${{esc(item.merchant)}}" data-cat="${{esc(item.category)}}" data-sub="${{esc(item.subcategory)}}">&#9998;</button>`;
     tr.innerHTML =
-      `<td style="padding:2px 12px 2px 60px;color:#64748b;font-size:0.8rem">${{item.date}} &mdash; ${{esc(item.merchant.substring(0,45))}}${{exTag}}</td>`+
+      `<td style="padding:2px 12px 2px 60px;color:#64748b;font-size:0.8rem">${{item.date}} &mdash; ${{esc(item.merchant.substring(0,45))}}${{exTag}} ${{editBtn}}</td>`+
       `<td style="padding:2px 12px;text-align:right;color:#64748b;font-size:0.8rem">\u00a3${{sign}}${{fmt(Math.abs(item.amount))}}</td>`+
       `<td style="padding:2px 12px"></td>`;
     ref.after(tr);
@@ -571,6 +612,176 @@ toSel.addEventListener('change', () => {{
 document.getElementById('showExcluded').addEventListener('change', render);
 
 render();
+</script>
+
+<!-- ── Recategorise Modal ── -->
+<div class="modal-overlay" id="recatOverlay">
+  <div class="modal">
+    <h3>Re-categorise Transaction</h3>
+    <div class="modal-info">
+      <div><span class="mi-label">Merchant:</span> <span class="mi-val" id="rcMerchant"></span></div>
+      <div><span class="mi-label">Current:</span> <span class="mi-val" id="rcCurrent"></span></div>
+    </div>
+    <label for="rcCatSel">Category</label>
+    <select id="rcCatSel"><option value="">Loading…</option></select>
+    <label for="rcSubSel">Subcategory</label>
+    <select id="rcSubSel"><option value="">—</option></select>
+    <label for="rcNewSub" id="rcNewSubLabel" style="display:none">New subcategory name</label>
+    <input type="text" id="rcNewSub" style="display:none" placeholder="e.g. Car Insurance">
+    <div class="scope-row">
+      <label class="scope-opt"><input type="radio" name="rcScope" value="single" checked> This transaction only</label>
+      <label class="scope-opt"><input type="radio" name="rcScope" value="merchant"> All <strong id="rcMerchantCount"></strong> matching</label>
+    </div>
+    <label class="remember-row"><input type="checkbox" id="rcRemember" checked> Remember rule for future imports</label>
+    <div id="rcStatus"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="rcCancel">Cancel</button>
+      <button class="btn-save" id="rcSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Recategorise logic ──
+let _catTree = null;
+let _rcTxnId = null;
+
+async function loadCatTree() {{
+  if (_catTree) return _catTree;
+  try {{
+    const r = await fetch('/api/categories');
+    _catTree = await r.json();
+  }} catch(e) {{ _catTree = {{tree:{{}}, id_map:{{}}}}; }}
+  return _catTree;
+}}
+
+function populateCatSelect(tree, currentCat) {{
+  const sel = document.getElementById('rcCatSel');
+  sel.innerHTML = '';
+  Object.keys(tree).sort().forEach(c => {{
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    if (c === currentCat) o.selected = true;
+    sel.appendChild(o);
+  }});
+}}
+
+function populateSubSelect(tree, cat, currentSub) {{
+  const sel = document.getElementById('rcSubSel');
+  sel.innerHTML = '';
+  const subs = tree[cat] || [];
+  subs.forEach(s => {{
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    if (s === currentSub) o.selected = true;
+    sel.appendChild(o);
+  }});
+  // "+ New subcategory" option
+  const oNew = document.createElement('option');
+  oNew.value = '__new__'; oNew.textContent = '+ New subcategory…';
+  sel.appendChild(oNew);
+  toggleNewSub();
+}}
+
+function toggleNewSub() {{
+  const isNew = document.getElementById('rcSubSel').value === '__new__';
+  document.getElementById('rcNewSub').style.display = isNew ? '' : 'none';
+  document.getElementById('rcNewSubLabel').style.display = isNew ? '' : 'none';
+  if (isNew) document.getElementById('rcNewSub').focus();
+}}
+
+async function openRecatModal(txnId, merchant, curCat, curSub) {{
+  _rcTxnId = txnId;
+  document.getElementById('rcMerchant').textContent = merchant;
+  document.getElementById('rcCurrent').textContent = curCat + ' / ' + curSub;
+  document.getElementById('rcStatus').innerHTML = '';
+  document.getElementById('rcSave').disabled = false;
+  document.getElementById('rcNewSub').value = '';
+
+  // Count matching merchant transactions
+  const matchCount = ALL_TXNS.filter(t => t.merchant === merchant).length;
+  document.getElementById('rcMerchantCount').textContent = matchCount + ' ' + esc(merchant);
+
+  const data = await loadCatTree();
+  populateCatSelect(data.tree, curCat);
+  populateSubSelect(data.tree, curCat, curSub);
+
+  document.getElementById('rcCatSel').onchange = () => {{
+    populateSubSelect(data.tree, document.getElementById('rcCatSel').value, '');
+  }};
+  document.getElementById('rcSubSel').onchange = toggleNewSub;
+
+  document.getElementById('recatOverlay').classList.add('active');
+}}
+
+function closeRecatModal() {{
+  document.getElementById('recatOverlay').classList.remove('active');
+}}
+
+async function saveRecat() {{
+  const btn = document.getElementById('rcSave');
+  btn.disabled = true;
+  const statusEl = document.getElementById('rcStatus');
+  statusEl.innerHTML = '';
+
+  const cat = document.getElementById('rcCatSel').value;
+  const subSel = document.getElementById('rcSubSel').value;
+  const newSub = document.getElementById('rcNewSub').value.trim();
+  const scope = document.querySelector('input[name="rcScope"]:checked').value;
+  const remember = document.getElementById('rcRemember').checked;
+
+  const body = {{
+    txn_id: _rcTxnId,
+    category: cat,
+    subcategory: subSel === '__new__' ? '' : subSel,
+    new_subcategory: subSel === '__new__' ? newSub : '',
+    scope: scope,
+    remember_rule: remember
+  }};
+
+  try {{
+    const r = await fetch('/api/recategorize', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(body)
+    }});
+    const data = await r.json();
+    if (data.ok) {{
+      statusEl.innerHTML = `<div class="status-msg status-ok">Updated ${{data.updated}} transaction(s). Reloading…</div>`;
+      // Reload the report after a short delay
+      setTimeout(() => {{
+        closeRecatModal();
+        window.location.reload();
+      }}, 800);
+    }} else {{
+      statusEl.innerHTML = `<div class="status-msg status-err">${{esc(data.error)}}</div>`;
+      btn.disabled = false;
+    }}
+  }} catch(e) {{
+    statusEl.innerHTML = `<div class="status-msg status-err">Network error: ${{esc(e.message)}}</div>`;
+    btn.disabled = false;
+  }}
+}}
+
+// Wire up modal buttons
+document.getElementById('rcCancel').addEventListener('click', closeRecatModal);
+document.getElementById('rcSave').addEventListener('click', saveRecat);
+document.getElementById('recatOverlay').addEventListener('click', e => {{
+  if (e.target === e.currentTarget) closeRecatModal();
+}});
+
+// Delegate edit button clicks
+document.addEventListener('click', e => {{
+  const btn = e.target.closest('.edit-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  openRecatModal(
+    parseInt(btn.dataset.txnid),
+    btn.dataset.merchant,
+    btn.dataset.cat,
+    btn.dataset.sub
+  );
+}});
 </script>
 </body>
 </html>"""

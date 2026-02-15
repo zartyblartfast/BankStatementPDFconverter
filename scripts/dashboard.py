@@ -301,6 +301,192 @@ def _add_category_rule(merchant_core: str, category: str, subcategory: str):
         w.writerow([merchant_core, "", category, subcategory, "auto-added by dashboard"])
 
 
+@app.route("/api/categories")
+def api_categories():
+    """Return the full category tree plus a flat lookup of subcategory_ids."""
+    cat_tree = _load_cat_tree()
+    # Build subcategory_id lookup from DB
+    id_map = {}  # {"Category|Subcategory": subcategory_id}
+    if DB_PATH.exists():
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT c.name AS cat, s.name AS sub, s.subcategory_id "
+            "FROM subcategories s JOIN categories c ON s.category_id = c.category_id"
+        ).fetchall()
+        for r in rows:
+            id_map[f"{r['cat']}|{r['sub']}"] = r["subcategory_id"]
+        conn.close()
+    return jsonify({"tree": cat_tree, "id_map": id_map})
+
+
+@app.route("/api/recategorize", methods=["POST"])
+def api_recategorize():
+    """Re-assign category/subcategory for one transaction or all with same merchant_core."""
+    data = request.get_json()
+    txn_id = data.get("txn_id")
+    category = data.get("category", "")
+    subcategory = data.get("subcategory", "")
+    new_subcat_name = data.get("new_subcategory", "").strip()
+    scope = data.get("scope", "single")        # 'single' | 'merchant'
+    remember_rule = data.get("remember_rule", False)
+
+    if not txn_id or not category:
+        return jsonify({"ok": False, "error": "Missing required fields."})
+
+    # If creating a new subcategory, use that name
+    if new_subcat_name:
+        subcategory = new_subcat_name
+
+    if not subcategory:
+        return jsonify({"ok": False, "error": "Subcategory is required."})
+
+    conn = _get_db()
+    try:
+        # ── Ensure category + subcategory exist in DB and categories.json ──
+        # Category
+        conn.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (category,))
+        cat_row = conn.execute(
+            "SELECT category_id FROM categories WHERE name = ?", (category,)
+        ).fetchone()
+        cat_id = cat_row["category_id"]
+
+        # Subcategory
+        conn.execute(
+            "INSERT OR IGNORE INTO subcategories (category_id, name) VALUES (?, ?)",
+            (cat_id, subcategory),
+        )
+        sub_row = conn.execute(
+            "SELECT subcategory_id FROM subcategories WHERE category_id = ? AND name = ?",
+            (cat_id, subcategory),
+        ).fetchone()
+        new_subcat_id = sub_row["subcategory_id"]
+
+        # Update categories.json if new subcategory was added
+        cat_tree = _load_cat_tree()
+        if category not in cat_tree:
+            cat_tree[category] = []
+        if subcategory not in cat_tree[category]:
+            cat_tree[category].append(subcategory)
+            with open(CATEGORIES_JSON, "w", encoding="utf-8") as f:
+                json.dump(cat_tree, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+
+        # ── Get current transaction info for audit log ──
+        txn = conn.execute(
+            "SELECT txn_id, subcategory_id, merchant_core FROM transactions WHERE txn_id = ?",
+            (txn_id,),
+        ).fetchone()
+        if not txn:
+            return jsonify({"ok": False, "error": "Transaction not found."})
+
+        old_subcat_id = txn["subcategory_id"]
+        merchant = txn["merchant_core"] or ""
+
+        # Resolve old category name for audit
+        old_cat_label = "Uncategorised"
+        if old_subcat_id:
+            old_info = conn.execute(
+                "SELECT c.name AS cat, s.name AS sub FROM subcategories s "
+                "JOIN categories c ON s.category_id = c.category_id "
+                "WHERE s.subcategory_id = ?", (old_subcat_id,)
+            ).fetchone()
+            if old_info:
+                old_cat_label = f"{old_info['cat']} / {old_info['sub']}"
+        new_cat_label = f"{category} / {subcategory}"
+
+        # ── Determine which transactions to update ──
+        if scope == "merchant" and merchant:
+            affected = conn.execute(
+                "SELECT txn_id, subcategory_id FROM transactions WHERE merchant_core = ?",
+                (merchant,),
+            ).fetchall()
+        else:
+            affected = [txn]
+
+        # ── Update transactions + write audit log ──
+        updated_count = 0
+        for t in affected:
+            tid = t["txn_id"]
+            old_sid = t["subcategory_id"]
+            if old_sid == new_subcat_id:
+                continue  # already correct
+            conn.execute(
+                "UPDATE transactions SET subcategory_id = ? WHERE txn_id = ?",
+                (new_subcat_id, tid),
+            )
+            # Audit log
+            old_label = old_cat_label
+            if tid != txn_id and old_sid:
+                oi = conn.execute(
+                    "SELECT c.name AS cat, s.name AS sub FROM subcategories s "
+                    "JOIN categories c ON s.category_id = c.category_id "
+                    "WHERE s.subcategory_id = ?", (old_sid,)
+                ).fetchone()
+                if oi:
+                    old_label = f"{oi['cat']} / {oi['sub']}"
+            conn.execute(
+                "INSERT INTO edit_log (txn_id, field_changed, old_value, new_value, "
+                "old_category, new_category, merchant_core, scope) "
+                "VALUES (?, 'subcategory_id', ?, ?, ?, ?, ?, ?)",
+                (tid, str(old_sid), str(new_subcat_id), old_label, new_cat_label, merchant, scope),
+            )
+            updated_count += 1
+
+        # ── Remember rule ──
+        if remember_rule and merchant:
+            _update_category_rule(merchant, category, subcategory)
+
+        conn.commit()
+
+        # ── Regenerate report ──
+        _regenerate_report()
+
+        return jsonify({"ok": True, "updated": updated_count, "merchant_core": merchant})
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"ok": False, "error": str(e)})
+    finally:
+        conn.close()
+
+
+def _update_category_rule(merchant_core: str, category: str, subcategory: str):
+    """Add or update a rule in category_rules.csv for the given merchant."""
+    rows = []
+    updated = False
+    mc_upper = merchant_core.strip().upper()
+
+    if RULES_CSV.exists():
+        with open(RULES_CSV, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            for row in reader:
+                if row.get("merchant_core", "").strip().upper() == mc_upper:
+                    row["category"] = category
+                    row["subcategory"] = subcategory
+                    row["notes"] = row.get("notes", "") or "updated by dashboard"
+                    updated = True
+                rows.append(row)
+
+    if updated:
+        with open(RULES_CSV, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames)
+            w.writeheader()
+            w.writerows(rows)
+    else:
+        _add_category_rule(merchant_core, category, subcategory)
+
+
+def _regenerate_report():
+    """Re-run the report generator to update the static HTML."""
+    from scripts.report_income_vs_expense import _query_all, _build_html
+    txns, months = _query_all()
+    if months:
+        html = _build_html(txns, months)
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        (REPORTS_DIR / "income_vs_expense.html").write_text(html, encoding="utf-8")
+
+
 @app.route("/report")
 def report():
     """Show the report wrapped in the dashboard nav."""

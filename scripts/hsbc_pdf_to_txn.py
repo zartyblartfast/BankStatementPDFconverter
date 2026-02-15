@@ -49,6 +49,12 @@ class _PendingTxn:
 _RECONCILIATION_TOLERANCE = 0.01
 _DEFAULT_Y_TOLERANCE = 2.5
 _SUSPECT_MERGED_TOKEN_THRESHOLD = 6
+_SUSPECT_MERGED_LINE_LEN = 80
+_SUSPECT_DESC_LEN_THRESHOLD = 160
+_MIN_TXN_COUNT_DEFAULT = 5
+
+# Transaction prefixes known to represent credits (income)
+_CREDIT_PREFIXES = {"CR", "BGC", "FPI", "DEP"}
 
 
 def _import_pdfplumber():
@@ -171,7 +177,8 @@ def _truncate_description(description: str) -> str:
 
 def _looks_like_credit(description: str) -> bool:
     d = description.strip()
-    return d.startswith("CR ") or " CR " in (" " + d + " ")
+    first_word = d.split()[0].upper() if d else ""
+    return first_word in _CREDIT_PREFIXES
 
 
 def _index_lines(lines: Iterable[tuple[int, str]]) -> list[tuple[int, int, str]]:
@@ -319,7 +326,7 @@ def parse_pdf_to_lines_words(
                     "balancecarriedforward" in line_norm
                     or "balancebroughtforward" in line_norm
                 )
-                if has_marker and (token_count > _SUSPECT_MERGED_TOKEN_THRESHOLD or len(line) > 80):
+                if has_marker and (token_count > _SUSPECT_MERGED_TOKEN_THRESHOLD or len(line) > _SUSPECT_MERGED_LINE_LEN):
                     diag.suspect_merged_lines.append(
                         {"page": i, "token_count": token_count, "line": line}
                     )
@@ -984,7 +991,7 @@ def _write_suspects_csv(path: Path, suspects: list[dict[str, object]]) -> None:
             w.writerow(row)
 
 
-def _build_suspects(txns: list[Transaction], *, desc_len_threshold: int = 160) -> list[dict[str, object]]:
+def _build_suspects(txns: list[Transaction], *, desc_len_threshold: int = _SUSPECT_DESC_LEN_THRESHOLD) -> list[dict[str, object]]:
     suspects: list[dict[str, object]] = []
     for t in txns:
         reasons: list[str] = []
@@ -1526,10 +1533,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--outdir", default="finance/exports", help="output directory (default: finance/exports)")
     p.add_argument("--account-id", default="HSBC_UK", help="account identifier (default: HSBC_UK)")
     p.add_argument("--extractor", choices=["text", "words"], default="words", help="PDF extraction method (default: words)")
+    p.add_argument("--min-txns", type=int, default=_MIN_TXN_COUNT_DEFAULT,
+                   help=f"minimum transactions expected; fewer raises an error (default: {_MIN_TXN_COUNT_DEFAULT})")
 
     args = p.parse_args(argv)
 
     pdf_path = Path(args.pdf)
+    if pdf_path.suffix.lower() != ".pdf":
+        print(f"Error: expected a .pdf file, got '{pdf_path.suffix}' — {pdf_path}")
+        return 1
+    if not pdf_path.exists():
+        print(f"Error: file not found — {pdf_path}")
+        return 1
     outdir = Path(args.outdir)
 
     extractor_diag: Optional[WordExtractorDiagnostics] = None
@@ -1547,8 +1562,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         lines, source_file=str(pdf_path), account_id=args.account_id
     )
 
-    if len(txns) < 5:
+    if len(txns) < args.min_txns:
         raise RuntimeError(
+            f"Only {len(txns)} transactions found (minimum: {args.min_txns}). "
             "Extraction likely failed (PDF may be scanned/image-based). OCR not implemented in v1."
         )
 

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "bank-statement-pdf-converter"
+version = "1.0.0"
+description = "HSBC UK PDF statement converter, SQLite ledger, and interactive Flask dashboard"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+    "pdfplumber>=0.10",
+    "flask>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy",
+    "ruff",
+]
+
+[project.scripts]
+hsbc-pdf-to-txn = "scripts.hsbc_pdf_to_txn:main"
+ledger-dashboard = "scripts.dashboard:main"
+
+[tool.setuptools.packages.find]
+include = ["scripts*", "templates*", "config*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

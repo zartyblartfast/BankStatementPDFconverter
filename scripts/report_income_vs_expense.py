@@ -26,16 +26,16 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _statement_month(source_file: str) -> str:
-    """Extract YYYY-MM from a source_file path like 'StatementsPDF\\2025-01-10_Statement.pdf'."""
-    m = re.search(r'(\d{4}-\d{2})', source_file or '')
+def _statement_date(source_file: str) -> str:
+    """Extract YYYY-MM-DD from a source_file path like 'StatementsPDF\\2025-01-10_Statement.pdf'."""
+    m = re.search(r'(\d{4}-\d{2}-\d{2})', source_file or '')
     return m.group(1) if m else 'unknown'
 
 
 def _query_all() -> tuple[list[dict], list[str]]:
-    """Return (transactions, sorted_statement_months).
+    """Return (transactions, sorted_statement_dates).
 
-    Each transaction includes a statement_month derived from source_file.
+    Each transaction includes a statement_date (YYYY-MM-DD) derived from source_file.
     """
     conn = _connect()
     rows = conn.execute("""
@@ -58,9 +58,9 @@ def _query_all() -> tuple[list[dict], list[str]]:
     txns = []
     for r in rows:
         d = dict(r)
-        d['statement_month'] = _statement_month(d.pop('source_file'))
+        d['statement_date'] = _statement_date(d.pop('source_file'))
         txns.append(d)
-    months = sorted({t['statement_month'] for t in txns})
+    months = sorted({t['statement_date'] for t in txns})
     return txns, months
 
 
@@ -158,9 +158,9 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 <p class="subtitle" id="subtitle"></p>
 
 <div class="date-bar">
-  <label for="fromMonth">From (statement)</label>
+  <label for="fromMonth">From</label>
   <select id="fromMonth"></select>
-  <label for="toMonth">To (statement)</label>
+  <label for="toMonth">To</label>
   <select id="toMonth"></select>
   <div class="separator"></div>
   <label class="toggle-label"><input type="checkbox" id="showExcluded"> Show excluded</label>
@@ -267,7 +267,7 @@ function render() {{
 
   // Filter transactions
   const showExcl = document.getElementById('showExcluded').checked;
-  const txns = ALL_TXNS.filter(t => t.statement_month >= fromM && t.statement_month <= toM && (showExcl || !t.excluded));
+  const txns = ALL_TXNS.filter(t => t.statement_date >= fromM && t.statement_date <= toM && (showExcl || !t.excluded));
 
   // Subtitle
   document.getElementById('subtitle').innerHTML =

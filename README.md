@@ -89,7 +89,10 @@ python -m scripts.ingest_pipeline --pdf StatementsPDF/2026-02-10_Statement.pdf
 │   ├── init_db.py               # SQLite schema definition & initialisation
 │   ├── import_to_ledger.py      # Import categorised CSV into ledger database
 │   ├── ingest_pipeline.py       # End-to-end pipeline orchestrator
-│   ├── report_income_vs_expense.py  # Generate interactive HTML report
+│   ├── report_income_vs_expense.py      # Income vs Expenditure report
+│   ├── report_income_by_category.py     # Income by Source report
+│   ├── report_expenditure_by_category.py # Expenditure by Category report
+│   ├── report_expenditure_heatmap.py    # Expenditure Heatmap report
 │   ├── ledger_query.py          # CLI queries against the ledger
 │   ├── dashboard.py             # Flask web dashboard
 │   └── categorise.py            # Category rule matching logic
@@ -164,18 +167,37 @@ When re-processing a PDF (e.g. replacing a partial month with the full statement
 
 No user input required — fully automatic.
 
-### Income vs Expenditure Report
+### Interactive Reports
 
-Interactive HTML report (`finance/reports/income_vs_expense.html`):
+All reports are accessible via the **Report** tab's dropdown selector, share the same **From/To statement period filtering**, and are regenerated automatically on data changes.
+
+#### Income vs Expenditure
 
 - **Dual donut charts** — income and expenditure broken down by subcategory
 - **Net balance indicator** between the donuts
-- **From/To statement period dropdowns** — filter by statement date range (interdependent)
 - **3-level drill-down tables** — Category → Subcategory → Individual transactions
 - **Sort controls** — sort transactions by date or merchant
 - **Show excluded toggle** — reveal/hide excluded transactions
 - **Inline recategorisation** — ✎ icon opens a modal to reassign category/subcategory, with single-transaction or all-matching-merchant scope and optional rule persistence
 - **Transaction notes** — 📝 icon opens an inline text editor; saved notes appear in amber italic next to the merchant name
+
+#### Income by Source
+
+- **Horizontal bar chart** + **donut chart** — income broken down by subcategory (source)
+- **Summary table** with colour bars, amounts, and percentage share
+
+#### Expenditure by Category
+
+- **Horizontal bar chart** + **donut chart** — expenditure broken down by category
+- **Summary table** with colour bars, amounts, and percentage share
+
+#### Expenditure Heatmap
+
+- **Category × Statement Period grid** — colour-coded spend intensity (YlOrRd scale)
+- **Row/column/grand totals** highlighted in amber
+- **Hover tooltips** with exact amounts
+- **Click any cell** → subcategory breakdown popup (amount + share %)
+- **Click any subcategory** → individual transaction list popup (date, merchant, amount, notes)
 
 ### Flask Dashboard
 
@@ -184,7 +206,7 @@ Web UI at http://127.0.0.1:5000 with:
 - **Home** — stats overview (transactions, statements, income/expense, exceptions), import history, quick actions
 - **Ingest PDF** — select and process PDFs from `StatementsPDF/`
 - **Exceptions** — inline category assignment with dropdowns, bulk resolution for same-merchant transactions, "Remember rule" to auto-update `category_rules.csv`
-- **Report** — embedded Income vs Expenditure report with dashboard nav bar, inline recategorisation and transaction notes
+- **Report** — report selector dropdown with four interactive reports (Income vs Expenditure, Income by Source, Expenditure by Category, Expenditure Heatmap), embedded with dashboard nav bar
 - **Nav badge** — live count of open exceptions (amber) or green checkmark when all clear
 
 ## QA Workflow (recommended)

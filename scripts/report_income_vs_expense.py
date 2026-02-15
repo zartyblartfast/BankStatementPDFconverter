@@ -9,6 +9,7 @@ date filtering happens client-side — no need for CLI date arguments.
 """
 
 import json
+import re
 import sqlite3
 import webbrowser
 from pathlib import Path
@@ -25,10 +26,16 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _query_all() -> tuple[list[dict], list[str]]:
-    """Return (transactions, sorted_months).
+def _statement_month(source_file: str) -> str:
+    """Extract YYYY-MM from a source_file path like 'StatementsPDF\\2025-01-10_Statement.pdf'."""
+    m = re.search(r'(\d{4}-\d{2})', source_file or '')
+    return m.group(1) if m else 'unknown'
 
-    Each transaction is {date, month, amount, merchant, category, subcategory, excluded, exclude_reason}.
+
+def _query_all() -> tuple[list[dict], list[str]]:
+    """Return (transactions, sorted_statement_months).
+
+    Each transaction includes a statement_month derived from source_file.
     """
     conn = _connect()
     rows = conn.execute("""
@@ -39,7 +46,8 @@ def _query_all() -> tuple[list[dict], list[str]]:
                c.name            AS category,
                s.name            AS subcategory,
                t.excluded,
-               t.exclude_reason
+               t.exclude_reason,
+               t.source_file
         FROM transactions t
         JOIN subcategories s ON t.subcategory_id = s.subcategory_id
         JOIN categories c    ON s.category_id    = c.category_id
@@ -47,8 +55,12 @@ def _query_all() -> tuple[list[dict], list[str]]:
     """).fetchall()
     conn.close()
 
-    txns = [dict(r) for r in rows]
-    months = sorted({t["month"] for t in txns})
+    txns = []
+    for r in rows:
+        d = dict(r)
+        d['statement_month'] = _statement_month(d.pop('source_file'))
+        txns.append(d)
+    months = sorted({t['statement_month'] for t in txns})
     return txns, months
 
 
@@ -146,9 +158,9 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 <p class="subtitle" id="subtitle"></p>
 
 <div class="date-bar">
-  <label for="fromMonth">From</label>
+  <label for="fromMonth">From (statement)</label>
   <select id="fromMonth"></select>
-  <label for="toMonth">To</label>
+  <label for="toMonth">To (statement)</label>
   <select id="toMonth"></select>
   <div class="separator"></div>
   <label class="toggle-label"><input type="checkbox" id="showExcluded"> Show excluded</label>
@@ -255,7 +267,7 @@ function render() {{
 
   // Filter transactions
   const showExcl = document.getElementById('showExcluded').checked;
-  const txns = ALL_TXNS.filter(t => t.month >= fromM && t.month <= toM && (showExcl || !t.excluded));
+  const txns = ALL_TXNS.filter(t => t.statement_month >= fromM && t.statement_month <= toM && (showExcl || !t.excluded));
 
   // Subtitle
   document.getElementById('subtitle').innerHTML =

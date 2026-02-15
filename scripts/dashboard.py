@@ -510,30 +510,50 @@ def _update_category_rule(merchant_core: str, category: str, subcategory: str):
         _add_category_rule(merchant_core, category, subcategory)
 
 
+# ── Report registry ──────────────────────────────────────────
+REPORT_REGISTRY = [
+    ("income_vs_expense",        "Income vs Expenditure"),
+    ("expenditure_by_category",  "Expenditure by Category"),
+]
+
+
 def _regenerate_report():
-    """Re-run the report generator to update the static HTML."""
-    from scripts.report_income_vs_expense import _query_all, _build_html
+    """Re-run all report generators to update the static HTML."""
+    from scripts.report_income_vs_expense import _query_all
+    from scripts.report_income_vs_expense import _build_html as build_ive
+    from scripts.report_expenditure_by_category import _build_html as build_ebc
     txns, months = _query_all()
     if months:
-        html = _build_html(txns, months)
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        (REPORTS_DIR / "income_vs_expense.html").write_text(html, encoding="utf-8")
+        (REPORTS_DIR / "income_vs_expense.html").write_text(
+            build_ive(txns, months), encoding="utf-8")
+        (REPORTS_DIR / "expenditure_by_category.html").write_text(
+            build_ebc(txns, months), encoding="utf-8")
 
 
 @app.route("/report")
 def report():
-    """Show the report wrapped in the dashboard nav."""
-    report_path = REPORTS_DIR / "income_vs_expense.html"
+    """Show the report wrapped in the dashboard nav with a selector dropdown."""
+    name = request.args.get("name", REPORT_REGISTRY[0][0])
+    # Validate
+    valid_keys = {k for k, _ in REPORT_REGISTRY}
+    if name not in valid_keys:
+        name = REPORT_REGISTRY[0][0]
+    report_path = REPORTS_DIR / f"{name}.html"
     if not report_path.exists():
         flash("Report not found. Please generate it first.", "error")
         return redirect(url_for("home"))
-    return render_template("report.html", active_page="report")
+    return render_template("report.html", active_page="report",
+                           reports=REPORT_REGISTRY, current_report=name)
 
 
-@app.route("/report/raw")
-def report_raw():
-    """Serve the raw HTML report (used by the iframe)."""
-    report_path = REPORTS_DIR / "income_vs_expense.html"
+@app.route("/report/raw/<name>")
+def report_raw(name):
+    """Serve a raw HTML report by name (used by the iframe)."""
+    valid_keys = {k for k, _ in REPORT_REGISTRY}
+    if name not in valid_keys:
+        return "Unknown report.", 404
+    report_path = REPORTS_DIR / f"{name}.html"
     if not report_path.exists():
         return "Report not found.", 404
     return send_file(str(report_path))

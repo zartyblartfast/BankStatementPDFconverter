@@ -25,7 +25,13 @@ python -m pip install -r requirements.txt
 
 ### 1. Dashboard (recommended)
 
-The Flask dashboard provides a web UI for ingestion, exception handling, and reports:
+Double-click the launcher to start the server and open your browser:
+
+```
+start_dashboard.bat
+```
+
+Or run manually:
 
 ```bash
 python -m scripts.dashboard
@@ -36,6 +42,8 @@ Open http://127.0.0.1:5000 — from here you can:
 - **Ingest PDFs** — select a statement from `StatementsPDF/`, process it through the full pipeline
 - **Review Exceptions** — assign categories to unrecognised transactions via dropdown, with optional "Remember rule" to update `category_rules.csv` automatically
 - **View Reports** — interactive Income vs Expenditure report with dual donut charts and drill-down tables
+- **Recategorise Transactions** — click the ✎ icon on any transaction to change its category/subcategory (single or bulk), with optional rule persistence
+- **Annotate Transactions** — click the 📝 icon to add a descriptive note to any transaction (e.g. "car insurance")
 
 ### 2. Command-line pipeline
 
@@ -88,7 +96,8 @@ python -m scripts.ingest_pipeline --pdf StatementsPDF/2026-02-10_Statement.pdf
 ├── templates/                    # Jinja2 templates for the dashboard
 ├── StatementsPDF/               # Bank statement PDFs (gitignored)
 ├── tests/                        # Unit tests
-└── run_all_statements.py        # Batch reconciliation test runner
+├── run_all_statements.py        # Batch reconciliation test runner
+└── start_dashboard.bat          # One-click launcher (server + browser)
 ```
 
 ## Features
@@ -131,10 +140,11 @@ Additional debug exports (only written when reconciliation diffs are non-zero):
 
 SQLite database (`finance/ledger.db`) with tables:
 
-- **transactions** — all imported transactions with category, exclusion flags
+- **transactions** — all imported transactions with category, exclusion flags, user notes
 - **categories / subcategories** — lookup tables seeded from `categories.json`
 - **import_log** — tracks which source files have been imported
 - **exceptions** — uncategorised transactions flagged for user resolution
+- **edit_log** — audit trail of category changes for future undo/revert
 
 ### Transaction Exclusion
 
@@ -160,10 +170,12 @@ Interactive HTML report (`finance/reports/income_vs_expense.html`):
 
 - **Dual donut charts** — income and expenditure broken down by subcategory
 - **Net balance indicator** between the donuts
-- **From/To date dropdowns** — filter by month range (interdependent)
+- **From/To statement period dropdowns** — filter by statement date range (interdependent)
 - **3-level drill-down tables** — Category → Subcategory → Individual transactions
 - **Sort controls** — sort transactions by date or merchant
 - **Show excluded toggle** — reveal/hide excluded transactions
+- **Inline recategorisation** — ✎ icon opens a modal to reassign category/subcategory, with single-transaction or all-matching-merchant scope and optional rule persistence
+- **Transaction notes** — 📝 icon opens an inline text editor; saved notes appear in amber italic next to the merchant name
 
 ### Flask Dashboard
 
@@ -172,7 +184,7 @@ Web UI at http://127.0.0.1:5000 with:
 - **Home** — stats overview (transactions, statements, income/expense, exceptions), import history, quick actions
 - **Ingest PDF** — select and process PDFs from `StatementsPDF/`
 - **Exceptions** — inline category assignment with dropdowns, bulk resolution for same-merchant transactions, "Remember rule" to auto-update `category_rules.csv`
-- **Report** — embedded Income vs Expenditure report with dashboard nav bar
+- **Report** — embedded Income vs Expenditure report with dashboard nav bar, inline recategorisation and transaction notes
 - **Nav badge** — live count of open exceptions (amber) or green checkmark when all clear
 
 ## QA Workflow (recommended)

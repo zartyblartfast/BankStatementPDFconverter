@@ -83,7 +83,13 @@ python -m scripts.ingest_pipeline --pdf StatementsPDF/2026-02-10_Statement.pdf
 │   ├── ledger.db                 # SQLite ledger database (gitignored)
 │   └── reports/                  # Generated HTML reports (gitignored)
 ├── scripts/
-│   ├── hsbc_pdf_to_txn.py       # PDF → transaction extraction
+│   ├── hsbc_parser/             # PDF parser sub-package (split from monolith)
+│   │   ├── models.py            #   Data models (Transaction, WordExtractorDiagnostics)
+│   │   ├── patterns.py          #   Regex patterns, constants, noise lists
+│   │   ├── extractors.py        #   PDF → lines (text + words extractors)
+│   │   ├── parser.py            #   Lines → transactions + money-token logic
+│   │   └── exporters.py         #   CSV/JSON/warning/debug file writers
+│   ├── hsbc_pdf_to_txn.py       # CLI entry point + backward-compat re-exports
 │   ├── triage_descriptions.py   # Description normalisation & merchant_core extraction
 │   ├── apply_categories.py      # Apply category_rules.csv to extracted transactions
 │   ├── init_db.py               # SQLite schema definition & initialisation

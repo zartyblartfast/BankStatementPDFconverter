@@ -80,6 +80,30 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .hm-table .total-row .hm-cell {{ border-top:2px solid #475569; font-weight:700;
                                     background:transparent !important; color:#f59e0b;
                                     font-size:0.7rem; }}
+  /* ── clickable cells ── */
+  .hm-cell.clickable {{ cursor:pointer; }}
+  .hm-cell.clickable:active {{ transform:scale(0.95); }}
+
+  /* ── subcategory popup ── */
+  .popup-overlay {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
+                    z-index:100; align-items:center; justify-content:center; }}
+  .popup-overlay.open {{ display:flex; }}
+  .popup {{ background:#1e293b; border:1px solid #475569; border-radius:12px;
+            padding:24px; min-width:340px; max-width:500px; max-height:80vh;
+            overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.5); }}
+  .popup h3 {{ font-size:1rem; margin:0 0 4px 0; color:#f8fafc; }}
+  .popup .popup-period {{ color:#94a3b8; font-size:0.8rem; margin-bottom:14px; }}
+  .popup table {{ width:100%; border-collapse:collapse; }}
+  .popup th {{ text-align:left; padding:5px 10px; color:#94a3b8; font-size:0.78rem;
+               font-weight:500; border-bottom:1px solid #334155; }}
+  .popup th:nth-child(2), .popup th:nth-child(3) {{ text-align:right; }}
+  .popup td {{ padding:6px 10px; font-size:0.85rem; border-bottom:1px solid #1e293b; }}
+  .popup td:nth-child(2), .popup td:nth-child(3) {{ text-align:right; }}
+  .popup tr:hover {{ background:#334155; }}
+  .popup .popup-total td {{ font-weight:700; border-top:2px solid #475569; padding-top:8px; }}
+  .popup-close {{ float:right; background:none; border:none; color:#94a3b8; font-size:1.2rem;
+                  cursor:pointer; padding:0 4px; line-height:1; }}
+  .popup-close:hover {{ color:#e2e8f0; }}
 </style>
 </head>
 <body>
@@ -97,6 +121,10 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   <h2>Spend Intensity by Category &amp; Statement Period</h2>
   <div id="heatmapWrap"></div>
   <div class="legend" id="legend"></div>
+</div>
+
+<div class="popup-overlay" id="popupOverlay">
+  <div class="popup" id="popupContent"></div>
 </div>
 
 <script>
@@ -180,16 +208,25 @@ function render() {{
   const activePeriods = ALL_MONTHS.filter(m => m >= fromM && m <= toM);
 
   // Build matrix: category → period → amount
+  // Also build subcategory detail: category → period → subcategory → amount
   const catPeriod = {{}};
   const catTotals = {{}};
+  const subDetail = {{}};
   filtered.forEach(t => {{
     const c = t.category;
+    const s = t.subcategory;
     const p = t.statement_date;
     const a = Math.abs(t.amount);
     if (!catPeriod[c]) catPeriod[c] = {{}};
     catPeriod[c][p] = (catPeriod[c][p] || 0) + a;
     catTotals[c] = (catTotals[c] || 0) + a;
+    // Subcategory detail
+    const key = c + '|||' + p;
+    if (!subDetail[key]) subDetail[key] = {{}};
+    subDetail[key][s] = (subDetail[key][s] || 0) + a;
   }});
+  // Store globally for click handler
+  window._subDetail = subDetail;
 
   // Sort categories by total descending
   const cats = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a]);
@@ -233,8 +270,9 @@ function render() {{
       const bg = cellBg(v, maxVal);
       const fg = textColour(v, maxVal);
       const label = v > 0 ? `\\u00a3${{fmt(v)}}` : '';
-      html += `<td><div class="hm-cell" style="background:${{bg}};color:${{fg}}">${{label}}`;
-      if (v > 0) html += `<span class="tip">${{esc(c)}} &middot; ${{periodLabel(p)}}: \\u00a3${{fmt2(v)}}</span>`;
+      const clickAttr = v > 0 ? ` class="hm-cell clickable" data-cat="${{esc(c)}}" data-period="${{p}}"` : ' class="hm-cell"';
+      html += `<td><div${{clickAttr}} style="background:${{bg}};color:${{fg}}">${{label}}`;
+      if (v > 0) html += `<span class="tip">${{esc(c)}} &middot; ${{periodLabel(p)}}: \u00a3${{fmt2(v)}}</span>`;
       html += '</div></td>';
     }});
     // Row total
@@ -287,6 +325,44 @@ toSel.addEventListener('change', () => {{
 }});
 
 render();
+
+// ── Subcategory popup on click ──
+const overlay = document.getElementById('popupOverlay');
+const popupEl = document.getElementById('popupContent');
+
+function closePopup() {{ overlay.classList.remove('open'); }}
+overlay.addEventListener('click', e => {{ if (e.target === overlay) closePopup(); }});
+document.addEventListener('keydown', e => {{ if (e.key === 'Escape') closePopup(); }});
+
+document.getElementById('heatmapWrap').addEventListener('click', e => {{
+  const cell = e.target.closest('.hm-cell.clickable');
+  if (!cell) return;
+  const cat = cell.dataset.cat;
+  const period = cell.dataset.period;
+  const key = cat + '|||' + period;
+  const subs = window._subDetail[key];
+  if (!subs) return;
+
+  // Sort subcategories by amount descending
+  const sorted = Object.entries(subs).sort((a, b) => b[1] - a[1]);
+  const total = sorted.reduce((s, e) => s + e[1], 0);
+
+  let html = `<button class="popup-close" title="Close">&times;</button>`;
+  html += `<h3>${{esc(cat)}}</h3>`;
+  html += `<div class="popup-period">${{periodLabel(period)}} &mdash; \u00a3${{fmt2(total)}}</div>`;
+  html += '<table><thead><tr><th>Subcategory</th><th>Amount</th><th>Share</th></tr></thead><tbody>';
+  sorted.forEach(([sub, amt]) => {{
+    const pct = total > 0 ? (amt / total * 100).toFixed(1) : '0.0';
+    html += `<tr><td>${{esc(sub)}}</td><td>\u00a3${{fmt2(amt)}}</td><td>${{pct}}%</td></tr>`;
+  }});
+  html += `<tr class="popup-total"><td>Total</td><td>\u00a3${{fmt2(total)}}</td><td>100.0%</td></tr>`;
+  html += '</tbody></table>';
+
+  popupEl.innerHTML = html;
+  overlay.classList.add('open');
+
+  popupEl.querySelector('.popup-close').addEventListener('click', closePopup);
+}});
 </script>
 </body>
 </html>"""

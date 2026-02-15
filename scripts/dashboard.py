@@ -514,6 +514,7 @@ def _update_category_rule(merchant_core: str, category: str, subcategory: str):
 REPORT_REGISTRY = [
     ("income_vs_expense",        "Income vs Expenditure"),
     ("expenditure_by_category",  "Expenditure by Category"),
+    ("expenditure_heatmap",      "Expenditure Heatmap"),
 ]
 
 
@@ -522,6 +523,7 @@ def _regenerate_report():
     from scripts.report_income_vs_expense import _query_all
     from scripts.report_income_vs_expense import _build_html as build_ive
     from scripts.report_expenditure_by_category import _build_html as build_ebc
+    from scripts.report_expenditure_heatmap import _build_html as build_ehm
     txns, months = _query_all()
     if months:
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -529,6 +531,8 @@ def _regenerate_report():
             build_ive(txns, months), encoding="utf-8")
         (REPORTS_DIR / "expenditure_by_category.html").write_text(
             build_ebc(txns, months), encoding="utf-8")
+        (REPORTS_DIR / "expenditure_heatmap.html").write_text(
+            build_ehm(txns, months), encoding="utf-8")
 
 
 @app.route("/report")

@@ -301,6 +301,30 @@ def _add_category_rule(merchant_core: str, category: str, subcategory: str):
         w.writerow([merchant_core, "", category, subcategory, "auto-added by dashboard"])
 
 
+@app.route("/api/update-note", methods=["POST"])
+def api_update_note():
+    """Update the user_note on a single transaction."""
+    data = request.get_json()
+    txn_id = data.get("txn_id")
+    note = (data.get("note") or "").strip() or None  # store NULL if empty
+
+    if not txn_id:
+        return jsonify({"ok": False, "error": "Missing txn_id."})
+
+    conn = _get_db()
+    try:
+        conn.execute("UPDATE transactions SET user_note = ? WHERE txn_id = ?", (note, txn_id))
+        conn.commit()
+        # Regenerate report so the note appears
+        _regenerate_report()
+        return jsonify({"ok": True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"ok": False, "error": str(e)})
+    finally:
+        conn.close()
+
+
 @app.route("/api/categories")
 def api_categories():
     """Return the full category tree plus a flat lookup of subcategory_ids."""

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     import_hash     TEXT    NOT NULL,
     excluded        INTEGER NOT NULL DEFAULT 0,       -- 1 = hide from reports
     exclude_reason  TEXT,
+    user_note       TEXT,                            -- free-text annotation
     CONSTRAINT FK_transactions_subcategory
         FOREIGN KEY (subcategory_id) REFERENCES subcategories (subcategory_id),
     CONSTRAINT UQ_transactions_hash UNIQUE (import_hash)

@@ -48,6 +48,7 @@ def _query_all() -> tuple[list[dict], list[str]]:
                s.name            AS subcategory,
                t.excluded,
                t.exclude_reason,
+               t.user_note,
                t.source_file
         FROM transactions t
         JOIN subcategories s ON t.subcategory_id = s.subcategory_id
@@ -78,7 +79,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 <title>Income vs Expenditure</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body {{ margin:0; padding:0; overflow-x:hidden; overflow-y:auto; }}
   body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
          background:#0f172a; color:#e2e8f0; padding:24px; }}
   h1 {{ font-size:1.6rem; margin-bottom:4px; color:#f8fafc; }}
@@ -152,9 +153,21 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .net-positive {{ color:#22c55e; }}
   .net-negative {{ color:#ef4444; }}
   /* ── edit button ── */
-  .edit-btn {{ background:none; border:none; color:#475569; cursor:pointer; font-size:0.75rem;
-               padding:2px 6px; border-radius:4px; opacity:0.5; transition:opacity 0.15s; }}
+  .edit-btn {{ background:none; border:none; color:#94a3b8; cursor:pointer; font-size:0.75rem;
+               padding:2px 6px; border-radius:4px; opacity:0.7; transition:opacity 0.15s; }}
   .edit-btn:hover {{ opacity:1; color:#60a5fa; }}
+  /* ── note ── */
+  .note-tag {{ color:#f59e0b; font-style:italic; font-size:0.75rem; margin-left:6px; }}
+  .note-btn {{ background:none; border:none; color:#94a3b8; cursor:pointer; font-size:0.7rem;
+               padding:2px 4px; border-radius:4px; opacity:0.5; transition:opacity 0.15s; margin-left:2px; }}
+  .note-btn:hover {{ opacity:1; color:#f59e0b; }}
+  .note-inline {{ display:inline-flex; align-items:center; gap:4px; margin-left:6px; }}
+  .note-inline input {{ background:#334155; color:#f59e0b; border:1px solid #475569; font-style:italic;
+                        border-radius:4px; padding:2px 6px; font-size:0.75rem; width:180px; }}
+  .note-inline input:focus {{ outline:none; border-color:#f59e0b; }}
+  .note-inline button {{ background:#334155; border:none; color:#94a3b8; cursor:pointer;
+                         font-size:0.7rem; padding:2px 6px; border-radius:4px; }}
+  .note-inline button:hover {{ color:#e2e8f0; }}
   /* ── modal ── */
   .modal-overlay {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
                     z-index:1000; align-items:center; justify-content:center; }}
@@ -336,7 +349,8 @@ function render() {{
     if (!subItems[key]) subItems[key] = [];
     subItems[key].push({{txn_id: t.txn_id, date: t.date, amount: t.amount, merchant: t.merchant,
                          category: c, subcategory: s,
-                         excluded: t.excluded, exclude_reason: t.exclude_reason}});
+                         excluded: t.excluded, exclude_reason: t.exclude_reason,
+                         user_note: t.user_note || ''}});
   }});
 
   // ── Category lists ──
@@ -569,8 +583,12 @@ function renderItemRows(tbody, subRow) {{
     const sign = item.amount < 0 ? '-' : '';
     const exTag = item.excluded ? `<span class="excluded-tag" title="${{esc(item.exclude_reason||'')}}">EXCLUDED</span>` : '';
     const editBtn = `<button class="edit-btn" title="Re-categorise" data-txnid="${{item.txn_id}}" data-merchant="${{esc(item.merchant)}}" data-cat="${{esc(item.category)}}" data-sub="${{esc(item.subcategory)}}">&#9998;</button>`;
+    const noteDisplay = item.user_note
+      ? `<span class="note-tag">${{esc(item.user_note)}}</span>`
+      : '';
+    const noteBtn = `<button class="note-btn" title="${{item.user_note ? 'Edit note' : 'Add note'}}" data-txnid="${{item.txn_id}}" data-note="${{esc(item.user_note)}}">&#128221;</button>`;
     tr.innerHTML =
-      `<td style="padding:2px 12px 2px 60px;color:#64748b;font-size:0.8rem">${{item.date}} &mdash; ${{esc(item.merchant.substring(0,45))}}${{exTag}} ${{editBtn}}</td>`+
+      `<td style="padding:2px 12px 2px 60px;color:#64748b;font-size:0.8rem">${{item.date}} &mdash; ${{esc(item.merchant.substring(0,45))}}${{exTag}}${{noteDisplay}} ${{editBtn}}${{noteBtn}}</td>`+
       `<td style="padding:2px 12px;text-align:right;color:#64748b;font-size:0.8rem">\u00a3${{sign}}${{fmt(Math.abs(item.amount))}}</td>`+
       `<td style="padding:2px 12px"></td>`;
     ref.after(tr);
@@ -781,6 +799,78 @@ document.addEventListener('click', e => {{
     btn.dataset.cat,
     btn.dataset.sub
   );
+}});
+
+// ── Inline note editing ──
+function openNoteEditor(noteBtn) {{
+  // Don't open twice
+  if (noteBtn.parentElement.querySelector('.note-inline')) return;
+  const txnId = noteBtn.dataset.txnid;
+  const current = noteBtn.dataset.note || '';
+
+  const wrap = document.createElement('span');
+  wrap.className = 'note-inline';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = current; inp.placeholder = 'Add note\u2026';
+  inp.maxLength = 120;
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = '\u2713';
+  saveBtn.title = 'Save';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = '\u2717';
+  cancelBtn.title = 'Cancel';
+  wrap.appendChild(inp);
+  wrap.appendChild(saveBtn);
+  wrap.appendChild(cancelBtn);
+  noteBtn.after(wrap);
+  inp.focus();
+
+  async function save() {{
+    const note = inp.value.trim();
+    try {{
+      const r = await fetch('/api/update-note', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{txn_id: parseInt(txnId), note: note}})
+      }});
+      const data = await r.json();
+      if (data.ok) {{
+        // Update local data and re-render
+        noteBtn.dataset.note = note;
+        noteBtn.title = note ? 'Edit note' : 'Add note';
+        // Update the note tag next to merchant
+        const td = noteBtn.closest('td');
+        const oldTag = td.querySelector('.note-tag');
+        if (oldTag) oldTag.remove();
+        if (note) {{
+          const tag = document.createElement('span');
+          tag.className = 'note-tag';
+          tag.textContent = note;
+          // Insert before the edit button
+          const editB = td.querySelector('.edit-btn');
+          if (editB) editB.before(tag);
+        }}
+        wrap.remove();
+      }}
+    }} catch(err) {{
+      inp.style.borderColor = '#ef4444';
+    }}
+  }}
+
+  saveBtn.addEventListener('click', e => {{ e.stopPropagation(); save(); }});
+  cancelBtn.addEventListener('click', e => {{ e.stopPropagation(); wrap.remove(); }});
+  inp.addEventListener('keydown', e => {{
+    if (e.key === 'Enter') {{ e.stopPropagation(); save(); }}
+    if (e.key === 'Escape') {{ e.stopPropagation(); wrap.remove(); }}
+  }});
+  inp.addEventListener('click', e => e.stopPropagation());
+}}
+
+document.addEventListener('click', e => {{
+  const btn = e.target.closest('.note-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  openNoteEditor(btn);
 }});
 </script>
 </body>

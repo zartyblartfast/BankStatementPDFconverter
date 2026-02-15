@@ -513,6 +513,7 @@ def _update_category_rule(merchant_core: str, category: str, subcategory: str):
 # ── Report registry ──────────────────────────────────────────
 REPORT_REGISTRY = [
     ("income_vs_expense",        "Income vs Expenditure"),
+    ("income_by_category",       "Income by Source"),
     ("expenditure_by_category",  "Expenditure by Category"),
     ("expenditure_heatmap",      "Expenditure Heatmap"),
 ]
@@ -522,6 +523,7 @@ def _regenerate_report():
     """Re-run all report generators to update the static HTML."""
     from scripts.report_income_vs_expense import _query_all
     from scripts.report_income_vs_expense import _build_html as build_ive
+    from scripts.report_income_by_category import _build_html as build_ibc
     from scripts.report_expenditure_by_category import _build_html as build_ebc
     from scripts.report_expenditure_heatmap import _build_html as build_ehm
     txns, months = _query_all()
@@ -529,6 +531,8 @@ def _regenerate_report():
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         (REPORTS_DIR / "income_vs_expense.html").write_text(
             build_ive(txns, months), encoding="utf-8")
+        (REPORTS_DIR / "income_by_category.html").write_text(
+            build_ibc(txns, months), encoding="utf-8")
         (REPORTS_DIR / "expenditure_by_category.html").write_text(
             build_ebc(txns, months), encoding="utf-8")
         (REPORTS_DIR / "expenditure_heatmap.html").write_text(

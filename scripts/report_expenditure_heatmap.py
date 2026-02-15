@@ -104,6 +104,30 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
   .popup-close {{ float:right; background:none; border:none; color:#94a3b8; font-size:1.2rem;
                   cursor:pointer; padding:0 4px; line-height:1; }}
   .popup-close:hover {{ color:#e2e8f0; }}
+  .popup tr.sub-clickable {{ cursor:pointer; }}
+  .popup tr.sub-clickable td:first-child {{ text-decoration:underline; text-decoration-color:#475569;
+                                             text-underline-offset:2px; }}
+  .popup tr.sub-clickable:hover td:first-child {{ text-decoration-color:#60a5fa; color:#60a5fa; }}
+
+  /* ── transaction detail popup (layer 2) ── */
+  .popup-overlay2 {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5);
+                     z-index:200; align-items:center; justify-content:center; }}
+  .popup-overlay2.open {{ display:flex; }}
+  .popup2 {{ background:#1e293b; border:1px solid #475569; border-radius:12px;
+             padding:24px; min-width:400px; max-width:600px; max-height:80vh;
+             overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.5); }}
+  .popup2 h3 {{ font-size:1rem; margin:0 0 2px 0; color:#f8fafc; }}
+  .popup2 .popup-sub {{ color:#60a5fa; font-size:0.85rem; margin-bottom:2px; }}
+  .popup2 .popup-period {{ color:#94a3b8; font-size:0.8rem; margin-bottom:14px; }}
+  .popup2 table {{ width:100%; border-collapse:collapse; }}
+  .popup2 th {{ text-align:left; padding:5px 10px; color:#94a3b8; font-size:0.78rem;
+                font-weight:500; border-bottom:1px solid #334155; }}
+  .popup2 th:nth-child(2) {{ text-align:right; }}
+  .popup2 td {{ padding:5px 10px; font-size:0.82rem; border-bottom:1px solid #1e293b; }}
+  .popup2 td:nth-child(2) {{ text-align:right; }}
+  .popup2 tr:hover {{ background:#334155; }}
+  .popup2 .popup-total td {{ font-weight:700; border-top:2px solid #475569; padding-top:8px; }}
+  .popup2 .note-tag {{ color:#f59e0b; font-style:italic; font-size:0.75rem; margin-left:6px; }}
 </style>
 </head>
 <body>
@@ -125,6 +149,9 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 
 <div class="popup-overlay" id="popupOverlay">
   <div class="popup" id="popupContent"></div>
+</div>
+<div class="popup-overlay2" id="popupOverlay2">
+  <div class="popup2" id="popupContent2"></div>
 </div>
 
 <script>
@@ -225,8 +252,9 @@ function render() {{
     if (!subDetail[key]) subDetail[key] = {{}};
     subDetail[key][s] = (subDetail[key][s] || 0) + a;
   }});
-  // Store globally for click handler
+  // Store globally for click handlers
   window._subDetail = subDetail;
+  window._filtered = filtered;
 
   // Sort categories by total descending
   const cats = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a]);
@@ -332,7 +360,6 @@ const popupEl = document.getElementById('popupContent');
 
 function closePopup() {{ overlay.classList.remove('open'); }}
 overlay.addEventListener('click', e => {{ if (e.target === overlay) closePopup(); }});
-document.addEventListener('keydown', e => {{ if (e.key === 'Escape') closePopup(); }});
 
 document.getElementById('heatmapWrap').addEventListener('click', e => {{
   const cell = e.target.closest('.hm-cell.clickable');
@@ -353,7 +380,7 @@ document.getElementById('heatmapWrap').addEventListener('click', e => {{
   html += '<table><thead><tr><th>Subcategory</th><th>Amount</th><th>Share</th></tr></thead><tbody>';
   sorted.forEach(([sub, amt]) => {{
     const pct = total > 0 ? (amt / total * 100).toFixed(1) : '0.0';
-    html += `<tr><td>${{esc(sub)}}</td><td>\u00a3${{fmt2(amt)}}</td><td>${{pct}}%</td></tr>`;
+    html += `<tr class="sub-clickable" data-cat="${{esc(cat)}}" data-sub="${{esc(sub)}}" data-period="${{period}}"><td>${{esc(sub)}}</td><td>\u00a3${{fmt2(amt)}}</td><td>${{pct}}%</td></tr>`;
   }});
   html += `<tr class="popup-total"><td>Total</td><td>\u00a3${{fmt2(total)}}</td><td>100.0%</td></tr>`;
   html += '</tbody></table>';
@@ -362,6 +389,52 @@ document.getElementById('heatmapWrap').addEventListener('click', e => {{
   overlay.classList.add('open');
 
   popupEl.querySelector('.popup-close').addEventListener('click', closePopup);
+
+  // Subcategory row click → transaction detail
+  popupEl.querySelectorAll('tr.sub-clickable').forEach(row => {{
+    row.addEventListener('click', () => showTxnPopup(row.dataset.cat, row.dataset.sub, row.dataset.period));
+  }});
+}});
+
+// ── Transaction detail popup (layer 2) ──
+const overlay2 = document.getElementById('popupOverlay2');
+const popup2El = document.getElementById('popupContent2');
+
+function closePopup2() {{ overlay2.classList.remove('open'); }}
+overlay2.addEventListener('click', e => {{ if (e.target === overlay2) closePopup2(); }});
+
+function showTxnPopup(cat, sub, period) {{
+  const txns = (window._filtered || []).filter(t =>
+    t.category === cat && t.subcategory === sub && t.statement_date === period
+  );
+  if (!txns.length) return;
+
+  // Sort by date
+  txns.sort((a, b) => a.date.localeCompare(b.date));
+  const total = txns.reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  let html = `<button class="popup-close" title="Close" onclick="document.getElementById('popupOverlay2').classList.remove('open')">&times;</button>`;
+  html += `<h3>${{esc(cat)}}</h3>`;
+  html += `<div class="popup-sub">${{esc(sub)}}</div>`;
+  html += `<div class="popup-period">${{periodLabel(period)}} &mdash; ${{txns.length}} transaction${{txns.length === 1 ? '' : 's'}} &mdash; \u00a3${{fmt2(total)}}</div>`;
+  html += '<table><thead><tr><th>Date / Merchant</th><th>Amount</th></tr></thead><tbody>';
+  txns.forEach(t => {{
+    const noteTag = t.user_note ? `<span class="note-tag">${{esc(t.user_note)}}</span>` : '';
+    html += `<tr><td>${{t.date}} &mdash; ${{esc(t.merchant.substring(0,40))}}${{noteTag}}</td><td>\u00a3${{fmt2(Math.abs(t.amount))}}</td></tr>`;
+  }});
+  html += `<tr class="popup-total"><td>Total (${{txns.length}})</td><td>\u00a3${{fmt2(total)}}</td></tr>`;
+  html += '</tbody></table>';
+
+  popup2El.innerHTML = html;
+  overlay2.classList.add('open');
+}}
+
+// Update Escape to close top-most popup
+document.addEventListener('keydown', e => {{
+  if (e.key === 'Escape') {{
+    if (overlay2.classList.contains('open')) closePopup2();
+    else closePopup();
+  }}
 }});
 </script>
 </body>

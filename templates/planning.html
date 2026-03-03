@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Expenditure Planning — Ledger Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .planning-layout { display:flex; gap:24px; align-items:flex-start; }
+  .filter-panel { flex:0 0 240px; position:sticky; top:24px; }
+  .grid-panel  { flex:1; overflow-x:auto; }
+
+  /* ── filter checkboxes ── */
+  .filter-panel h2 { margin-bottom:12px; }
+  .filter-list { list-style:none; }
+  .filter-list li { padding:5px 0; font-size:0.85rem; display:flex; align-items:center; gap:8px; }
+  .filter-list input[type="checkbox"] { accent-color:#3b82f6; width:16px; height:16px; cursor:pointer; }
+  .filter-list label { cursor:pointer; user-select:none; }
+  .filter-actions { margin-top:12px; display:flex; gap:8px; }
+  .filter-actions button { background:#334155; color:#e2e8f0; border:1px solid #475569;
+    border-radius:6px; padding:4px 12px; font-size:0.8rem; cursor:pointer; transition:all 0.15s; }
+  .filter-actions button:hover { background:#475569; }
+
+  /* ── data grid ── */
+  .grid-panel table { font-variant-numeric:tabular-nums; }
+  .grid-panel th, .grid-panel td { white-space:nowrap; padding:6px 10px; font-size:0.8rem; }
+  .grid-panel th { position:sticky; top:0; background:#1e293b; z-index:2; }
+  .grid-panel th.rotate { writing-mode:vertical-rl; text-orientation:mixed;
+    transform:rotate(180deg); height:100px; vertical-align:bottom; }
+  .grid-panel td.num { text-align:right; font-family:'Cascadia Code','Fira Mono',monospace; }
+  .grid-panel tr.totals-row td { border-top:2px solid #475569; font-weight:700; }
+  .grid-panel td.cat-name { font-weight:500; white-space:nowrap; }
+
+  /* avg column highlight */
+  .grid-panel th.avg-col, .grid-panel td.avg-col {
+    background:#1a2744; border-left:2px solid #3b82f6; }
+  .grid-panel tr.totals-row td.avg-col { background:#172040; }
+
+  /* row-total column */
+  .grid-panel th.total-col, .grid-panel td.total-col { border-left:1px solid #475569; }
+
+  /* ── summary card ── */
+  .summary-card { margin-top:20px; display:flex; gap:16px; flex-wrap:wrap; }
+  .summary-card .metric { background:#1e293b; border-radius:10px; padding:16px 24px; text-align:center; }
+  .summary-card .metric .value { font-size:1.6rem; font-weight:700; }
+  .summary-card .metric .label { color:#94a3b8; font-size:0.8rem; margin-top:4px; }
+
+  /* excluded category row dimmed */
+  tr.excluded td { opacity:0.3; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Expenditure Planning</h1>
+<p class="subtitle">Average monthly spend by category — toggle categories to model retirement scenarios</p>
+
+<div class="summary-card" id="summaryCard"></div>
+
+<div class="planning-layout" style="margin-top:20px;">
+  <!-- Left: category filter -->
+  <div class="card filter-panel">
+    <h2>Categories</h2>
+    <div class="filter-actions">
+      <button id="btnAll">Select All</button>
+      <button id="btnNone">Deselect All</button>
+    </div>
+    <div class="filter-actions" style="margin-top:8px;">
+      <button id="btnDownload" class="btn btn-primary btn-sm" style="width:100%;">&#11015; Download CSV</button>
+    </div>
+    <ul class="filter-list" id="filterList"></ul>
+  </div>
+
+  <!-- Right: data grid -->
+  <div class="card grid-panel">
+    <div id="gridLoading" class="muted" style="padding:20px;">Loading data&hellip;</div>
+    <table id="gridTable" style="display:none;">
+      <thead id="gridHead"></thead>
+      <tbody id="gridBody"></tbody>
+      <tfoot id="gridFoot"></tfoot>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  const fmt = v => v.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+  const median = arr => {
+    if (arr.length === 0) return 0;
+    const s = [...arr].sort((a,b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 !== 0 ? s[mid] : (s[mid-1] + s[mid]) / 2;
+  };
+
+  let DATA = null;   // {categories, months, grid}
+  let checked = {};  // {cat: bool}
+
+  async function load() {
+    const resp = await fetch('/api/planning-data');
+    DATA = await resp.json();
+    DATA.categories.forEach(c => { checked[c] = true; });
+    buildFilters();
+    render();
+    document.getElementById('gridLoading').style.display = 'none';
+    document.getElementById('gridTable').style.display = '';
+  }
+
+  function buildFilters() {
+    const ul = document.getElementById('filterList');
+    ul.innerHTML = '';
+    DATA.categories.forEach(cat => {
+      const li = document.createElement('li');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = true; cb.id = 'cb_' + cat;
+      cb.addEventListener('change', () => { checked[cat] = cb.checked; render(); });
+      const lbl = document.createElement('label');
+      lbl.htmlFor = cb.id; lbl.textContent = cat;
+      li.appendChild(cb); li.appendChild(lbl);
+      ul.appendChild(li);
+    });
+    document.getElementById('btnAll').onclick = () => {
+      DATA.categories.forEach(c => { checked[c] = true; });
+      ul.querySelectorAll('input').forEach(cb => cb.checked = true);
+      render();
+    };
+    document.getElementById('btnNone').onclick = () => {
+      DATA.categories.forEach(c => { checked[c] = false; });
+      ul.querySelectorAll('input').forEach(cb => cb.checked = false);
+      render();
+    };
+  }
+
+  function render() {
+    const months = DATA.months;
+    const cats = DATA.categories;
+    const nMonths = months.length;
+
+    // ── thead ──
+    let headHtml = '<tr><th>Category</th>';
+    months.forEach(m => {
+      headHtml += `<th class="rotate">${m}</th>`;
+    });
+    headHtml += '<th class="total-col">Row Total</th>';
+    headHtml += '<th class="avg-col">Avg / Month</th>';
+    headHtml += '<th class="avg-col">Median / Month</th></tr>';
+    document.getElementById('gridHead').innerHTML = headHtml;
+
+    // ── tbody ──
+    const colTotals = new Array(nMonths).fill(0);
+    let grandTotal = 0;
+    let grandAvgSum = 0;
+    const activeMonthTotals = new Array(nMonths).fill(0);  // for median footer
+    let bodyHtml = '';
+
+    cats.forEach(cat => {
+      const active = checked[cat];
+      const cls = active ? '' : ' class="excluded"';
+      let rowTotal = 0;
+      let rowHtml = `<tr${cls}><td class="cat-name">${cat}</td>`;
+
+      const monthVals = [];
+      months.forEach((m, i) => {
+        const v = (DATA.grid[cat] || {})[m] || 0;
+        monthVals.push(v);
+        rowTotal += v;
+        if (active) colTotals[i] += v;
+        rowHtml += `<td class="num">${v > 0 ? fmt(v) : '—'}</td>`;
+      });
+
+      const avg = nMonths > 0 ? rowTotal / nMonths : 0;
+      const med = median(monthVals);
+      if (active) {
+        grandTotal += rowTotal; grandAvgSum += avg;
+        monthVals.forEach((v, i) => { activeMonthTotals[i] += v; });
+      }
+
+      rowHtml += `<td class="num total-col">${fmt(rowTotal)}</td>`;
+      rowHtml += `<td class="num avg-col">${fmt(avg)}</td>`;
+      rowHtml += `<td class="num avg-col">${fmt(med)}</td>`;
+      rowHtml += '</tr>';
+      bodyHtml += rowHtml;
+    });
+    document.getElementById('gridBody').innerHTML = bodyHtml;
+
+    // ── tfoot ──
+    let colTotalSum = 0;
+    let footHtml = '<tr class="totals-row"><td class="cat-name">Total (selected)</td>';
+    months.forEach((m, i) => {
+      footHtml += `<td class="num">${fmt(colTotals[i])}</td>`;
+      colTotalSum += colTotals[i];
+    });
+    const grandAvg = nMonths > 0 ? colTotalSum / nMonths : 0;
+    footHtml += `<td class="num total-col">${fmt(colTotalSum)}</td>`;
+    const grandMedian = median(activeMonthTotals);
+    footHtml += `<td class="num avg-col">${fmt(grandAvg)}</td>`;
+    footHtml += `<td class="num avg-col">${fmt(grandMedian)}</td>`;
+    footHtml += '</tr>';
+    document.getElementById('gridFoot').innerHTML = footHtml;
+
+    // ── summary cards ──
+    const checkedCount = cats.filter(c => checked[c]).length;
+    document.getElementById('summaryCard').innerHTML = `
+      <div class="metric"><div class="value">${checkedCount} / ${cats.length}</div>
+        <div class="label">Categories Selected</div></div>
+      <div class="metric"><div class="value">${nMonths}</div>
+        <div class="label">Months of Data</div></div>
+      <div class="metric"><div class="value green">&pound;${fmt(grandAvg)}</div>
+        <div class="label">Avg Monthly Spend (selected)</div></div>
+      <div class="metric"><div class="value" style="color:#60a5fa;">&pound;${fmt(colTotalSum)}</div>
+        <div class="label">Total Spend (selected)</div></div>
+    `;
+  }
+
+  function downloadCsv() {
+    if (!DATA) return;
+    const months = DATA.months;
+    const nMonths = months.length;
+    const selectedCats = DATA.categories.filter(c => checked[c]);
+    if (selectedCats.length === 0) { alert('No categories selected.'); return; }
+
+    const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+    const rows = [];
+
+    // header
+    rows.push(['Category', ...months].map(esc).join(','));
+
+    // data rows — selected only
+    selectedCats.forEach(cat => {
+      const cells = [esc(cat)];
+      months.forEach(m => {
+        const v = (DATA.grid[cat] || {})[m] || 0;
+        cells.push(v > 0 ? v.toFixed(2) : '0.00');
+      });
+      rows.push(cells.join(','));
+    });
+
+    const blob = new Blob([rows.join('\r\n')], {type: 'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'expenditure_planning.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('btnDownload').addEventListener('click', downloadCsv);
+
+  load();
+})();
+</script>
+{% endblock %}

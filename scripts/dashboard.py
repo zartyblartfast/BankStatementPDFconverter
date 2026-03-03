@@ -510,6 +510,51 @@ def _update_category_rule(merchant_core: str, category: str, subcategory: str):
         _add_category_rule(merchant_core, category, subcategory)
 
 
+# ── Expenditure Planning ─────────────────────────────────────
+
+@app.route("/planning")
+def planning():
+    """Expenditure Planning page — monthly spend grid with category toggles."""
+    return render_template("planning.html", active_page="planning")
+
+
+@app.route("/api/planning-data")
+def api_planning_data():
+    """Return expenditure data grouped by category × month for the planning grid.
+
+    Response JSON:
+      categories: [str]          — sorted category names
+      months:     [str]          — sorted YYYY-MM strings
+      grid:       {cat: {month: total}}  — absolute spend (positive numbers)
+    """
+    if not DB_PATH.exists():
+        return jsonify({"categories": [], "months": [], "grid": {}})
+
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT c.name AS category,"
+        "       SUBSTR(t.txn_date, 1, 7) AS month,"
+        "       SUM(ABS(t.amount)) AS total"
+        " FROM transactions t"
+        " JOIN subcategories s ON t.subcategory_id = s.subcategory_id"
+        " JOIN categories c ON s.category_id = c.category_id"
+        " WHERE t.amount < 0 AND t.excluded = 0"
+        " GROUP BY c.name, SUBSTR(t.txn_date, 1, 7)"
+    ).fetchall()
+    conn.close()
+
+    grid: dict[str, dict[str, float]] = {}
+    month_set: set[str] = set()
+    for r in rows:
+        cat, month, total = r["category"], r["month"], round(r["total"], 2)
+        grid.setdefault(cat, {})[month] = total
+        month_set.add(month)
+
+    categories = sorted(grid.keys())
+    months = sorted(month_set)
+    return jsonify({"categories": categories, "months": months, "grid": grid})
+
+
 # ── Report registry ──────────────────────────────────────────
 REPORT_REGISTRY = [
     ("income_vs_expense",        "Income vs Expenditure"),

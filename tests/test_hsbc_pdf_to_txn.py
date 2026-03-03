@@ -93,12 +93,23 @@ class TestLooksLikeCredit(unittest.TestCase):
     def test_cr_prefix(self):
         self.assertTrue(_looks_like_credit("CR WA888685A DWP XB"))
 
-    def test_cr_in_middle(self):
-        self.assertTrue(_looks_like_credit("SOME CR TEXT"))
+    def test_bgc_prefix(self):
+        self.assertTrue(_looks_like_credit("BGC EMPLOYER SALARY"))
+
+    def test_fpi_prefix(self):
+        self.assertTrue(_looks_like_credit("FPI JOHN DOE RENT"))
+
+    def test_dep_prefix(self):
+        self.assertTrue(_looks_like_credit("DEP CASH DEPOSIT"))
+
+    def test_cr_in_middle_not_credit(self):
+        # CR in the middle is not a credit prefix
+        self.assertFalse(_looks_like_credit("SOME CR TEXT"))
 
     def test_no_credit(self):
         self.assertFalse(_looks_like_credit("VIS AMAZON UK"))
         self.assertFalse(_looks_like_credit("DD NORTHNORTHANTS"))
+        self.assertFalse(_looks_like_credit("FPO TRANSFER OUT"))
 
     def test_cr_substring_not_word(self):
         # "CREDIT" contains "CR" but not as a separate word

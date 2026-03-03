@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Ledger Dashboard{% endblock %}
+
+{% block content %}
+<h1>Ledger Dashboard</h1>
+<p class="subtitle">Overview of your bank statement data</p>
+
+<div class="card-grid">
+  <div class="stat-card">
+    <div class="value green">{{ stats.total_txns }}</div>
+    <div class="label">Total Transactions</div>
+  </div>
+  <div class="stat-card">
+    <div class="value">{{ stats.statements }}</div>
+    <div class="label">Statements Imported</div>
+  </div>
+  <div class="stat-card">
+    <div class="value muted">{{ stats.statement_range }}</div>
+    <div class="label">Statement Range</div>
+  </div>
+  <div class="stat-card">
+    {% if stats.open_exceptions > 0 %}
+      <div class="value amber">⚠ {{ stats.open_exceptions }}</div>
+    {% else %}
+      <div class="value green">✓ 0</div>
+    {% endif %}
+    <div class="label">Open Exceptions</div>
+  </div>
+</div>
+
+<div class="card-grid">
+  <div class="stat-card">
+    <div class="value green">£{{ stats.total_income }}</div>
+    <div class="label">Total Income</div>
+  </div>
+  <div class="stat-card">
+    <div class="value red">£{{ stats.total_expense }}</div>
+    <div class="label">Total Expenditure</div>
+  </div>
+  <div class="stat-card">
+    <div class="value {{ 'green' if stats.net_raw >= 0 else 'red' }}">£{{ stats.net }}</div>
+    <div class="label">Net Balance</div>
+  </div>
+  <div class="stat-card">
+    <div class="value muted">{{ stats.last_import }}</div>
+    <div class="label">Last Import</div>
+  </div>
+</div>
+
+{% if stats.open_exceptions > 0 %}
+<div class="alert alert-info">
+  You have <strong>{{ stats.open_exceptions }}</strong> exception{{ 's' if stats.open_exceptions != 1 else '' }}
+  that need{{ '' if stats.open_exceptions != 1 else 's' }} attention.
+  <a href="/exceptions" style="color:#60a5fa;">Review exceptions →</a>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Quick Actions</h2>
+  <div style="display:flex; gap:12px; margin-top:12px;">
+    <a href="/ingest" class="btn btn-primary">Ingest New PDF</a>
+    <a href="/report" class="btn btn-success">View Report</a>
+    <a href="/exceptions" class="btn btn-primary">Review Exceptions</a>
+  </div>
+</div>
+
+{% if recent_imports %}
+<div class="card">
+  <h2>Import History</h2>
+  <table>
+    <thead><tr><th>Source File</th><th class="right">Transactions</th><th>Imported At</th></tr></thead>
+    <tbody>
+    {% for imp in recent_imports %}
+      <tr>
+        <td>{{ imp.source_file }}</td>
+        <td class="right">{{ imp.row_count }}</td>
+        <td class="muted">{{ imp.imported_at }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Report — Ledger Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .report-bar { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  .report-bar label { color:#94a3b8; font-size:0.9rem; }
+  .report-bar select { background:#334155; color:#e2e8f0; border:1px solid #475569;
+                       border-radius:6px; padding:6px 12px; font-size:0.9rem; cursor:pointer; }
+  .report-bar select:focus { outline:none; border-color:#60a5fa; }
+  .report-frame { width:100%; border:none; border-radius:12px;
+                  background:#0f172a; min-height:600px; overflow:hidden; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="report-bar">
+  <label for="reportSelect">Report:</label>
+  <select id="reportSelect">
+    {% for key, label in reports %}
+    <option value="{{ key }}" {% if key == current_report %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+<iframe class="report-frame" src="/report/raw/{{ current_report }}" id="reportFrame"></iframe>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-resize iframe to content height
+const frame = document.getElementById('reportFrame');
+function resizeFrame() {
+  try {
+    frame.style.height = frame.contentDocument.body.scrollHeight + 40 + 'px';
+  } catch(e) {}
+}
+frame.addEventListener('load', resizeFrame);
+
+// Switch report on dropdown change
+document.getElementById('reportSelect').addEventListener('change', e => {
+  const key = e.target.value;
+  frame.src = '/report/raw/' + key;
+  // Update URL without reload so bookmarks work
+  history.replaceState(null, '', '/report?name=' + key);
+});
+</script>
+{% endblock %}

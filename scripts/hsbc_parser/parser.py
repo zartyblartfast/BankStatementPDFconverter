@@ -214,10 +214,27 @@ def _norm_desc(s: str) -> str:
 
 
 def _extract_first_money_token(text: str) -> Optional[str]:
+    split_decimal = re.search(
+        r"£?\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d\s+\d\)?-?",
+        text,
+    )
+    if split_decimal:
+        return re.sub(r"\s+", "", split_decimal.group(0))
     m = re.search(r"£?\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?-?", text)
     if not m:
         return None
     return m.group(0)
+
+
+def _looks_like_foreign_amount_line(text: str) -> bool:
+    return bool(re.fullmatch(r"(?!GBP\b)[A-Z]{3}\s+£?\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?-?", text.strip()))
+
+
+def _extract_visa_rate_amount(text: str) -> Optional[str]:
+    m = re.search(r"\bVisa\s+Rate\s+(£?\(?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?-?)\s*$", text.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    return m.group(1)
 
 
 def _extract_statement_totals(indexed_lines: list[tuple[int, int, str]]) -> dict[str, float]:
@@ -437,6 +454,7 @@ def parse_lines_to_transactions(
     last_txn_index: Optional[int] = None
 
     pending: Optional[_PendingTxn] = None
+    skip_loop_indices: set[int] = set()
 
     last_seen_txn_date: Optional[str] = None
 
@@ -452,6 +470,8 @@ def parse_lines_to_transactions(
         pending = None
 
     for loop_idx, (page, line_idx, line) in enumerate(indexed_lines):
+        if loop_idx in skip_loop_indices:
+            continue
         if _is_noise_line(line):
             continue
         m = _DATE_RE.match(line)
@@ -465,6 +485,68 @@ def parse_lines_to_transactions(
                         used_row_refs.add(f"{page}:{line_idx}")
                         pending.desc_parts.append(cont)
                         continue
+                    if _looks_like_foreign_amount_line(cont):
+                        next_idx = loop_idx + 1
+                        if next_idx < len(indexed_lines):
+                            next_page, next_line_idx, next_text = indexed_lines[next_idx]
+                            visa_amount = _extract_visa_rate_amount(next_text)
+                            if visa_amount is not None:
+                                used_row_refs.add(pending.row_ref)
+                                used_row_refs.add(f"{page}:{line_idx}")
+                                used_row_refs.add(f"{next_page}:{next_line_idx}")
+                                pending.desc_parts.append(cont)
+                                pending.desc_parts.append(next_text.strip())
+                                txn_date = pending.txn_date
+                                description_full = " ".join(pending.desc_parts).strip()
+                                description = _truncate_description(description_full)
+                                row_ref = f"{next_page}:{next_line_idx}"
+
+                                try:
+                                    mi = _interpret_money_tokens(
+                                        [visa_amount],
+                                        has_balance_column=has_balance_column,
+                                        description_full=description_full,
+                                        last_balance=last_balance,
+                                        row_ref=row_ref,
+                                        line=next_text,
+                                        page=next_page,
+                                        txn_date=txn_date,
+                                        description=description,
+                                        prev_txn=txns[last_txn_index] if last_txn_index is not None else None,
+                                    )
+                                except ValueError:
+                                    warnings.append(f"{row_ref} | money parse failed | {next_text}")
+                                    pending = None
+                                    skip_loop_indices.add(next_idx)
+                                    continue
+
+                                warnings.extend(mi.warnings)
+                                recon_gaps.extend(mi.recon_gaps)
+                                if mi.amount is not None and mi.parsed_balance is None:
+                                    mi.amount = _lookahead_sign_correction(
+                                        mi.amount, next_idx, indexed_lines,
+                                    )
+                                if mi.parsed_balance is not None:
+                                    last_balance = mi.parsed_balance
+                                elif mi.amount is not None and last_balance is not None:
+                                    last_balance = last_balance + mi.amount
+                                if mi.amount is not None:
+                                    txn = Transaction(
+                                        source_file=source_file,
+                                        account_id=account_id,
+                                        txn_date=txn_date,
+                                        description_raw=description,
+                                        amount=float(mi.amount),
+                                        currency=default_currency,
+                                        page=next_page,
+                                        row_ref=row_ref,
+                                    )
+                                    txns.append(txn)
+                                    last_txn_index = len(txns) - 1
+                                    last_seen_txn_date = txn_date
+                                pending = None
+                                skip_loop_indices.add(next_idx)
+                                continue
                     tokens = _repair_split_money_tokens(cont.split())
                     remaining, money_tokens = _find_money_tokens_from_end(tokens, max_count=3)
                     if money_tokens:
@@ -728,6 +810,8 @@ def parse_lines_to_transactions(
             last_balance = mi.parsed_balance
         elif mi.amount is not None and last_balance is not None:
             last_balance = last_balance + mi.amount
+
+    flush_pending_as_warning()
 
     deduped: list[Transaction] = []
     seen_row_refs: set[str] = set()

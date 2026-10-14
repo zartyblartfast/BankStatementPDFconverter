@@ -1,0 +1,21 @@
+<style>#categoryManager [hidden] { display:none!important; } #categoryManager::backdrop { background:rgba(0,0,0,.65); }</style>
+<dialog id="categoryManager" aria-labelledby="categoryManagerTitle" style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:12px;padding:24px;width:min(460px,90vw);max-height:85vh;overflow:auto">
+  <form id="categoryManagerForm">
+    <h2 id="categoryManagerTitle">Manage categories</h2>
+    <p class="muted" style="margin-bottom:16px">Add definitions only. No transactions or remembered rules will change.</p>
+    <label style="display:block;margin-bottom:12px"><input id="categoryManagerNewMode" type="checkbox"> Create a new category</label>
+    <label id="categoryManagerExistingLabel" style="display:block">Existing category
+      <select id="categoryManagerExisting" style="width:100%;margin:6px 0 12px"><option value="">— Select —</option>{% for cat in categories %}<option>{{ cat }}</option>{% endfor %}</select>
+    </label>
+    <label id="categoryManagerNewLabel" hidden>New category name
+      <input id="categoryManagerName" type="text" maxlength="100" style="width:100%;margin:6px 0 12px">
+    </label>
+    <label for="categoryManagerSubs">New subcategories — one per line</label>
+    <textarea id="categoryManagerSubs" required rows="4" style="display:block;width:100%;background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:8px;margin:6px 0 12px" placeholder="Food&#10;Vet&#10;Insurance"></textarea>
+    <p id="categoryManagerStatus" role="status" aria-live="polite" style="margin-bottom:12px"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="categoryManagerClose" type="button" class="btn">Close</button>
+      <button id="categoryManagerSave" type="submit" class="btn btn-primary">Add definitions</button>
+    </div>
+  </form>
+</dialog>

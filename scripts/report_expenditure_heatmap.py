@@ -7,19 +7,29 @@ Interactive HTML heatmap with from/to statement-period filtering.
 Rows = expense categories (sorted by total spend), columns = statement periods.
 """
 
-import json
+from scripts.report_assets import script_json
 import webbrowser
 from pathlib import Path
 
 from scripts.report_income_vs_expense import _query_all
 
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "finance" / "reports"
+from scripts.settings import get_settings
+
+REPORTS_DIR = get_settings().reports_dir
 
 
 def _build_html(txns: list[dict], all_months: list[str]) -> str:
+    from scripts.report_data import ReportRows
+    from scripts.report_assets import build_policy_report, localize_report_html
+    if isinstance(txns, ReportRows):
+        return build_policy_report(txns, all_months, 'expenditure_heatmap')
+    return localize_report_html(_build_legacy_html(txns, all_months))
+
+
+def _build_legacy_html(txns: list[dict], all_months: list[str]) -> str:
     """Build the Expenditure Heatmap HTML report."""
-    txns_json = json.dumps(txns)
-    months_json = json.dumps(all_months)
+    txns_json = script_json(txns)
+    months_json = script_json(all_months)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -447,7 +457,8 @@ def main():
         print("No data found in ledger.")
         return
 
-    html = _build_html(txns, months)
+    from scripts.report_assets import standalone_report_html
+    html = standalone_report_html(_build_html(txns, months))
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = REPORTS_DIR / "expenditure_heatmap.html"

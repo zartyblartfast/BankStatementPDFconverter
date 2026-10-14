@@ -1,0 +1,15 @@
+<form method="get" class="card" style="display:flex; flex-wrap:wrap; gap:12px; align-items:end;">
+  <label>Account<br><select name="account_id">
+    <option value="">All owned GBP accounts</option>
+    {% for account in accounts %}<option value="{{ account.account_id }}" {% if account_id == account.account_id %}selected{% endif %}>{{ account.display_name }}</option>{% endfor %}
+  </select></label>
+  <label>Period<br><select name="period">
+    {% for key, label in [('all','All dates'),('custom','Custom dates'),('year','Calendar year'),('month','Calendar month')] %}<option value="{{ key }}" {% if period.kind == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select></label>
+  <label>Year<br><input name="year" type="number" min="1" max="9999" value="{{ period.year }}" style="width:85px"></label>
+  <label>Month<br><input name="month" type="number" min="1" max="12" value="{{ period.month }}" style="width:65px"></label>
+  <label>From<br><input name="start" type="date" value="{{ period.start }}"></label>
+  <label>Through<br><input name="end" type="date" value="{{ period.end }}"></label>
+  <button class="btn btn-primary">Show exact scope</button>
+  <span class="muted">{{ period.label }} · GBP · transaction date{% if not accounts %} · No supported accounts available{% endif %}</span>
+</form>

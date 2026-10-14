@@ -13,10 +13,13 @@ Design notes for future SQL Server migration:
 """
 
 import argparse
+from contextlib import closing
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "finance" / "ledger.db"
+from scripts.settings import get_settings
+
+DB_PATH = get_settings().db_path
 
 _SCHEMA_SQL = """
 -- Categories lookup
@@ -117,20 +120,20 @@ CREATE INDEX IF NOT EXISTS IX_edit_log_changed
 """
 
 
-def init_db(force: bool = False) -> Path:
+def init_db(force: bool = False, *, db_path: str | Path | None = None) -> Path:
     """Create (or recreate) the ledger database and return its path."""
-    if force and DB_PATH.exists():
-        DB_PATH.unlink()
-        print(f"Deleted existing database: {DB_PATH}")
+    target = Path(db_path) if db_path is not None else DB_PATH
+    if force and target.exists():
+        target.unlink()
+        print(f"Deleted existing database: {target}")
 
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(_SCHEMA_SQL)
-    conn.close()
-    print(f"Ledger database ready: {DB_PATH}")
-    return DB_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(str(target))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(_SCHEMA_SQL)
+    print(f"Ledger database ready: {target}")
+    return target
 
 
 if __name__ == "__main__":

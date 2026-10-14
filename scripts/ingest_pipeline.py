@@ -31,10 +31,13 @@ from scripts.apply_categories import _load_rules
 from scripts.triage_descriptions import decompose_description
 from scripts.init_db import DB_PATH, init_db
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RULES_CSV = PROJECT_ROOT / "config" / "category_rules.csv"
-CATEGORIES_JSON = PROJECT_ROOT / "config" / "categories.json"
-EXPORTS_DIR = PROJECT_ROOT / "finance" / "exports"
+from scripts.settings import get_settings
+
+SETTINGS = get_settings()
+PROJECT_ROOT = SETTINGS.root
+RULES_CSV = SETTINGS.category_rules_path
+CATEGORIES_JSON = SETTINGS.categories_path
+EXPORTS_DIR = SETTINGS.exports_dir
 
 
 @dataclass
@@ -95,10 +98,16 @@ def _seed_categories(conn: sqlite3.Connection) -> dict[tuple[str, str], int]:
 def run_pipeline(pdf_path: str) -> IngestResult:
     """Run the full ingestion pipeline for a single PDF.
 
+    Relative inputs are opened against the configured project root, not CWD.
+    Their existing Path-form source identity is retained for ledger matching;
+    explicit absolute CLI inputs remain absolute.
     Returns an IngestResult with stats and any errors.
     """
     result = IngestResult(pdf_path=pdf_path)
+    source_file = str(Path(pdf_path))
     pdf = Path(pdf_path)
+    if not pdf.is_absolute():
+        pdf = PROJECT_ROOT / pdf
 
     if not pdf.exists():
         result.error = f"PDF not found: {pdf}"
@@ -113,7 +122,7 @@ def run_pipeline(pdf_path: str) -> IngestResult:
         result.error = f"PDF extraction failed: {e}"
         return result
 
-    source_file = str(pdf)
+
     txns, warnings, _used, _recon = parse_lines_to_transactions(
         lines, source_file=source_file
     )

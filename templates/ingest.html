@@ -1,9 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Ingest PDF — Ledger Dashboard{% endblock %}
+{% block title %}Import Statements — Ledger Dashboard{% endblock %}
 
 {% block content %}
-<h1>Ingest Bank Statement PDF</h1>
-<p class="subtitle">Select a PDF from your StatementsPDF folder to process</p>
+<h1>Import Statements</h1>
+{% if not accounts or accounts|selectattr("setup_pending")|list %}
+<div class="alert alert-info">Account setup pending. New account setup requires an approved migration and IoM parser verification. No account is created by this page. Historical HSBC UK review is available only with observed GBP evidence.</div>
+{% endif %}
+<p class="subtitle">Select a PDF from your StatementsPDF folder or its subfolders to process</p>
 
 <div class="card">
   <h2>Available PDFs</h2>
@@ -11,8 +14,31 @@
     Place your PDF in the <code style="background:#334155;padding:2px 6px;border-radius:4px;">StatementsPDF/</code> folder, then select it below.
   </p>
 
+  <form method="POST" action="/ingest" id="folderForm" style="margin-bottom:16px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save_folder">
+    <label for="account_id">Statement account</label>
+    <select name="account_id" id="account_id" required>
+      <option value="">Select an account…</option>
+      {% for account in accounts %}
+      <option value="{{ account.account_id }}" {{ "selected" if account.account_id == selected_account }} {{ "disabled" if not account.import_enabled }}>{{ account.display_name }} — {{ account.account_id }}{{ " (unavailable: setup/verification or import policy)" if not account.import_enabled }}</option>
+      {% endfor %}
+    </select>
+    <label for="folder_path">Statement folder</label>
+    <select name="folder_path" id="folder_path" required {{ "disabled" if not folder_state.can_save }}>
+      <option value="">Choose a folder…</option>
+      {% for folder in folder_state.choices %}
+      <option value="{{ folder }}" {{ "selected" if folder == folder_state.selected }}>{{ "StatementsPDF/ (root)" if folder == "." else "StatementsPDF/" ~ folder }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm btn-primary" {{ "disabled" if not folder_state.can_save }}>Save folder</button>
+  </form>
+  {% if folder_state.message %}<div class="alert alert-info">{{ folder_state.message }}</div>{% endif %}
+  <p class="muted" style="font-size:0.85rem;margin-bottom:12px;">Saved folders limit this account's file list, not bank ownership evidence. Subfolders assigned to other accounts are excluded. Saving does not import or move files.</p>
   {% if pdfs %}
   <form method="POST" action="/ingest" id="ingestForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="account_id" value="{{ selected_account }}">
     <table>
       <thead>
         <tr>
@@ -25,11 +51,13 @@
       <tbody>
       {% for pdf in pdfs %}
         <tr>
-          <td><input type="radio" name="pdf" value="{{ pdf.path }}" {{ 'checked' if loop.first }}></td>
-          <td>{{ pdf.name }}</td>
+          <td><input type="radio" name="pdf" value="{{ pdf.path }}" {{ 'checked' if pdf.selected or (not pdfs|selectattr('selected')|list and loop.first) }}></td>
+          <td>{{ pdf.display_path }}</td>
           <td class="right muted">{{ pdf.size_kb }} KB</td>
           <td>
-            {% if pdf.imported %}
+            {% if not selected_account %}
+              <span class="muted">Select an account to see import status</span>
+            {% elif pdf.imported %}
               <span style="color:#f59e0b;">● Imported ({{ pdf.txn_count }} txns)</span>
             {% else %}
               <span class="muted">○ Not imported</span>
@@ -40,7 +68,8 @@
       </tbody>
     </table>
     <div style="margin-top:16px;">
-      <button type="submit" class="btn btn-primary" id="processBtn">Process Selected PDF</button>
+      <input type="hidden" name="action" value="preview">
+      <button type="submit" class="btn btn-primary" id="processBtn">Review Selected PDF</button>
       <span id="spinner" style="display:none; margin-left:12px; color:#94a3b8;">
         ⏳ Processing… this may take a few seconds
       </span>
@@ -48,10 +77,62 @@
   </form>
   {% else %}
   <div class="alert alert-info">
-    No PDFs found in <code>StatementsPDF/</code>. Please add a bank statement PDF and refresh.
+    {% if folder_state.ready %}No PDFs found in this account's saved statement folder. Add a statement there and refresh.{% else %}No PDFs offered until an available account has a saved statement folder.{% endif %}
   </div>
   {% endif %}
 </div>
+
+{% if import_preview %}
+<div class="card">
+  <h2>Import Review</h2>
+  <p class="subtitle">Account scope: <strong>{{ import_preview.account_display_name }} ({{ import_preview.account_id }})</strong>. Counts and matches apply only to this account.</p>
+  {% if import_preview.already_imported %}
+    <div class="alert alert-info">Already imported: <strong>{{ import_preview.document_name }}</strong>. This statement is already fully imported, so there is nothing new to commit.</div>
+  {% elif import_preview.status == 'eligible' %}
+    <div class="alert alert-success">Ready to import <strong>{{ import_preview.document_name }}</strong>. Review the counts below, then approve the commit.</div>
+  {% else %}
+    <div class="alert alert-error">Import blocked. Resolve the listed issues before committing.</div>
+  {% endif %}
+
+  <div class="card-grid" style="margin-top:16px;">
+    <div class="stat-card"><div class="value">{{ import_preview.counts.extracted }}</div><div class="label">Extracted</div></div>
+    <div class="stat-card"><div class="value green">{{ import_preview.counts.categorised }}</div><div class="label">Categorised</div></div>
+    <div class="stat-card"><div class="value {{ 'amber' if import_preview.counts.uncategorised > 0 else 'green' }}">{{ import_preview.counts.uncategorised }}</div><div class="label">Uncategorised</div></div>
+    <div class="stat-card"><div class="value">{{ import_preview.counts.additions }}</div><div class="label">New</div></div>
+    <div class="stat-card"><div class="value">{{ import_preview.counts.matches }}</div><div class="label">Matched existing</div></div>
+    <div class="stat-card"><div class="value {{ 'green' if import_preview.reconciliation.status == 'passed' else 'amber' }}">{{ import_preview.reconciliation.status }}</div><div class="label">Reconciliation</div></div>
+  </div>
+
+  {% if import_preview.reasons %}
+  <details open style="margin-top:12px;">
+    <summary style="cursor:pointer; color:#94a3b8; font-size:0.85rem;">Preview issues</summary>
+    <ul style="margin-top:8px; color:#fbbf24;">
+      {% for reason, detail in import_preview.reason_details %}<li><strong>{{ reason }}</strong>: {{ detail }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if import_preview.status == 'eligible' and not import_preview.already_imported %}
+  <form method="POST" action="/ingest" style="margin-top:16px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="commit">
+    <input type="hidden" name="import_token" value="{{ import_preview.token }}">
+    <input type="hidden" name="approve" value="yes">
+    <button type="submit" class="btn btn-primary">Approve and Import</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if commit_result %}
+<div class="card">
+  <h2>Import Committed</h2>
+  <p class="subtitle">Account scope: <strong>{{ commit_account.account_display_name }} ({{ commit_account.account_id }})</strong>.</p>
+  <div class="alert alert-success">
+    Imported {{ commit_result.added }} new transaction{{ 's' if commit_result.added != 1 else '' }} and matched {{ commit_result.matched }} existing transaction{{ 's' if commit_result.matched != 1 else '' }}.
+  </div>
+</div>
+{% endif %}
 
 {% if result %}
 <div class="card">
@@ -120,6 +201,11 @@
 
 {% block extra_js %}
 <script>
+document.getElementById('account_id')?.addEventListener('change', function() {
+  const url = new URL('/ingest', window.location.origin);
+  if (this.value) url.searchParams.set('account_id', this.value);
+  window.location.assign(url);
+});
 document.getElementById('ingestForm')?.addEventListener('submit', function() {
   document.getElementById('processBtn').disabled = true;
   document.getElementById('spinner').style.display = 'inline';

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Transaction search — Ledger Dashboard{% endblock %}
+{% block extra_css %}
+<style>
+  .search-form {display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
+  .search-form label {display:flex;flex-direction:column;gap:5px;font-size:.85rem;}
+  .search-form input {background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:6px 10px;}
+  .search-form input[name="q"] {width:250px;max-width:100%;}
+  .search-summary {display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px;}
+  .search-table td {vertical-align:top;}
+  .search-description {min-width:220px;overflow-wrap:anywhere;}
+  .bulk-search-toolbar {display:flex;gap:12px;flex-direction:column;padding:12px 0;margin-bottom:12px;border-block:1px solid #475569;}
+  .bulk-search-selection {display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .bulk-search-assignment {display:grid;grid-template-columns:minmax(0,240px) minmax(0,320px) auto;gap:12px;align-items:end;width:min(100%,820px);}
+  .bulk-search-assignment label {display:flex;flex-direction:column;gap:6px;min-width:0;}
+  .bulk-search-assignment select {width:100%;min-width:0;}
+  .bulk-search-assignment button {white-space:nowrap;}
+  @media(max-width:640px) {
+    .bulk-search-assignment {grid-template-columns:repeat(2,minmax(0,1fr));}
+    .bulk-search-assignment button {grid-column:1 / -1;justify-self:start;}
+  }
+  @media(max-width:380px) {.bulk-search-assignment {grid-template-columns:minmax(0,1fr);}}
+  .search-paging {display:flex;gap:16px;align-items:center;margin-top:16px;}
+  nav {flex-wrap:wrap;}
+</style>
+{% endblock %}
+{% block content %}
+<h1>Transaction search</h1>
+<button type="button" id="manageCategories" class="btn btn-sm" style="float:right" data-csrf="{{ csrf_token() }}">Manage categories</button>
+{% include '_category_manager.html' %}
+{% include '_search_recategorisation.html' %}
+<p class="subtitle">Search across all transactions — categorised or not. Payment dates do not determine which obligation a payment settles.</p>
+<div class="card">
+  <form class="search-form" method="get" action="{{ url_for('transactions_page') }}">
+    <label>Merchant / description<input type="text" name="q" maxlength="200" value="{{ filters.q }}" placeholder="e.g. Chambers"></label>
+    <label>From date<input type="date" name="start" value="{{ filters.start }}"></label>
+    <label>To date<input type="date" name="end" value="{{ filters.end }}"></label>
+    <label>Exact amount (£)<input type="number" name="amount" min="0" step="0.01" value="{{ filters.amount }}" placeholder="e.g. 600.00"></label>
+    <label>Direction<select name="direction">
+      {% for value,label in [('all','All transactions'),('credit','Credits — money in'),('debit','Debits — money out')] %}
+      <option value="{{ value }}" {% if filters.direction == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select></label>
+    <button class="btn btn-primary" type="submit">Search</button>
+    <a class="btn" href="{{ url_for('transactions_page') }}">Clear filters</a>
+  </form>
+</div>
+{% if error %}
+<div class="alert alert-error" role="alert">{{ error }}</div>
+{% else %}
+<div class="card">
+  <div class="search-summary">
+    <strong>{{ result.count }} matches</strong>
+    <span>Credits (include transfers): £{{ result.credits }}</span>
+    <span>Debits (include transfers): £{{ result.debits }}</span>
+    <span>Net: £{{ result.net }}</span>
+  </div>
+  <p class="muted" style="font-size:.8rem;margin-bottom:12px">Totals cover all matching results, not just this page. Transactions marked excluded from reports are still included in this search.</p>
+  {% if result.rows %}
+  <div id="searchBulkToolbar" class="bulk-search-toolbar" data-search-token="{{ search_token }}" data-count="{{ result.count }}">
+    <div class="bulk-search-selection">
+    <button type="button" id="searchSelectPage" class="btn btn-sm">Select this page</button>
+    <button type="button" id="searchSelectAll" class="btn btn-sm">Select all {{ result.count }} matching results</button>
+    <button type="button" id="searchClearSelection" class="btn btn-sm">Clear selection</button>
+    <strong id="searchSelectionCount">0 selected</strong>
+    <button type="button" id="searchMarkTransfer" class="btn btn-sm" disabled>Mark as transfer</button>
+    </div>
+    <div class="bulk-search-assignment">
+    <label>Category <select id="searchBulkCategory"><option value="">— Select —</option>{% for cat in categories %}<option>{{ cat }}</option>{% endfor %}</select></label>
+    <label>Subcategory <select id="searchBulkSubcategory" disabled><option value="">— Select —</option></select></label>
+    <button type="button" id="searchBulkApply" class="btn btn-primary" disabled>Apply to selection</button>
+    </div>
+    <small class="muted">Select exactly two rows on this page to mark a transfer: different owned GBP accounts, equal and opposite amounts. Posting dates may differ. Select all matching results cannot be used for transfers.</small>
+    <small class="muted">Selection is explicit; no future rules change. Selection clears when you navigate to another search or page.</small>
+    <span id="searchBulkStatus" role="status" aria-live="polite"></span>
+  </div>
+  <dialog id="searchTransferDialog" aria-labelledby="searchTransferTitle" style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:12px;padding:24px;width:min(560px,90vw);max-height:85vh;overflow:auto">
+    <h2 id="searchTransferTitle">Mark as transfer?</h2>
+    <div id="searchTransferMembers" style="overflow-wrap:anywhere;margin:12px 0"></div>
+    <p class="muted" style="margin-bottom:16px">Transfer principal is excluded from income/expenditure. Categories, notes and future rules stay unchanged. Undo restores the previous report treatment, including any existing exclusion.</p>
+    <button type="button" id="searchTransferCancel" class="btn">Cancel</button>
+    <button type="button" id="searchTransferConfirm" class="btn btn-primary">Confirm</button>
+  </dialog>
+  <p id="searchTransferStatus" role="status" aria-live="polite"></p>
+  <div style="overflow-x:auto">
+  <table class="search-table">
+    <thead><tr><th>Date</th><th>Account</th><th>Full description</th><th class="right">Amount</th><th>Category / Subcategory</th><th>Report status</th><th>Select / Action</th></tr></thead>
+    <tbody>{% for row in result.rows %}
+      <tr><td class="search-date" style="white-space:nowrap">{{ row.txn_date }}</td><td>{{ row.account_name }}</td><td class="search-description">{{ row.description_raw }}</td>
+        <td class="search-amount right {{ 'green' if row.amount > 0 else 'red' }}" style="white-space:nowrap">{% if row.amount > 0 %}+{% endif %}£{{ row.amount_display }}</td>
+        <td class="search-category">{% if row.category %}{{ row.category }} / {{ row.subcategory }}{% else %}<span class="amber">Uncategorised</span>{% endif %}</td>
+        <td class="muted">{% if row.transfer_group %}Transfer — excluded from income/expenditure{% if row.transfer_status == 'unmatched' %} (counterpart not linked){% endif %}{% if row.excluded %}; also excluded from reports{% endif %}{% elif not row.transfer_ready %}{{ 'Excluded from reports' if row.excluded else 'Transfer status unavailable' }}{% else %}{{ 'Excluded from reports' if row.excluded else 'Included' }}{% endif %}</td>
+        <td><input type="checkbox" class="search-row-select" value="{{ row.txn_id }}" data-transfer-group="{{ row.transfer_group }}" data-transfer-ready="{{ '1' if row.transfer_ready else '0' }}" aria-label="Select transaction {{ row.txn_date }} {{ row.description_raw }}"> <button type="button" class="recat-search btn btn-sm" data-txn="{{ row.txn_id }}" data-old-subcategory="{{ row.subcategory_id if row.subcategory_id is not none else '' }}" data-category="{{ row.category or '' }}" data-subcategory="{{ row.subcategory or '' }}">Re-categorise</button>{% if row.transfer_group %} <button type="button" class="search-undo-transfer btn btn-sm" data-group="{{ row.transfer_group }}">Undo transfer</button>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  </div>
+  <div class="search-paging">
+    {% if result.page > 1 %}<a class="btn btn-sm" href="{{ page_url(result.page - 1) }}">Previous</a>{% endif %}
+    <span class="muted">Showing {{ result.first }}–{{ result.last }} · Page {{ result.page }} of {{ result.pages }}</span>
+    {% if result.page < result.pages %}<a class="btn btn-sm" href="{{ page_url(result.page + 1) }}">Next</a>{% endif %}
+  </div>
+  {% else %}<p>No matching transactions.</p>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block extra_js %}
+<script>const CAT_TREE = {{ cat_tree|tojson }};</script>
+<script src="{{ url_for('static', filename='category_manager.js') }}"></script>
+<script src="{{ url_for('static', filename='search_recategorisation.js') }}"></script>
+<script src="{{ url_for('static', filename='search_bulk.js') }}"></script>
+<script src="{{ url_for('static', filename='search_transfers.js') }}"></script>
+{% endblock %}

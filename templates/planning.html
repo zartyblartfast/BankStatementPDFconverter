@@ -49,7 +49,10 @@
 
 {% block content %}
 <h1>Expenditure Planning</h1>
-<p class="subtitle">Average monthly spend by category — toggle categories to model retirement scenarios</p>
+<p class="subtitle">Transfer-adjusted debit movement by category — toggle categories to model scenarios, not inferred consumption.</p>
+{% include '_movement_scope.html' %}
+<p class="muted">Only explicitly confirmed own-account principal and report-hidden rows are removed. Fees, uncategorised debits and category-only hints remain. Averages and medians require complete verified months common to every selected account; missing or partial coverage is not zero spending.</p>
+<div class="card" id="movementSummary" role="status"></div>
 
 <div class="summary-card" id="summaryCard"></div>
 
@@ -82,25 +85,47 @@
 {% block extra_js %}
 <script>
 (function(){
-  const fmt = v => v.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+  // Source and calculations remain integer pence, including above Number's safe range.
+  const fmt = (v, divisor=1n) => {
+    if (v === null || divisor === 0n) return '—';
+    const negative = v < 0n;
+    v = negative ? -v : v;
+    const cents = v / divisor + ((v % divisor) * 2n >= divisor ? 1n : 0n);
+    return (negative ? '-' : '') + (cents / 100n).toLocaleString('en-GB') + '.' + String(cents % 100n).padStart(2, '0');
+  };
+  const escHtml = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const median = arr => {
-    if (arr.length === 0) return 0;
-    const s = [...arr].sort((a,b) => a - b);
+    if (arr.length === 0) return '—';
+    const s = [...arr].sort((a,b) => a < b ? -1 : a > b ? 1 : 0);
     const mid = Math.floor(s.length / 2);
-    return s.length % 2 !== 0 ? s[mid] : (s[mid-1] + s[mid]) / 2;
+    return s.length % 2 !== 0 ? fmt(s[mid]) : fmt(s[mid-1] + s[mid], 2n);
   };
 
   let DATA = null;   // {categories, months, grid}
-  let checked = {};  // {cat: bool}
+  const checked = Object.create(null);  // category names are literal keys, never prototype setters
 
   async function load() {
-    const resp = await fetch('/api/planning-data');
-    DATA = await resp.json();
-    DATA.categories.forEach(c => { checked[c] = true; });
-    buildFilters();
-    render();
-    document.getElementById('gridLoading').style.display = 'none';
-    document.getElementById('gridTable').style.display = '';
+    try {
+      const resp = await fetch('/api/planning-data' + window.location.search);
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || 'Unable to load this exact scope');
+      DATA = result;
+      DATA.categories.forEach(c => { checked[c] = true; });
+      buildFilters();
+      render();
+      const movement = DATA.movement_pence_text;
+      document.getElementById('movementSummary').textContent =
+        `Raw credits £${fmt(BigInt(movement.raw.credits_pence))} · Raw debits £${fmt(BigInt(movement.raw.debits_pence))} · ` +
+        `Confirmed transfer in £${fmt(BigInt(movement.transfers.in_pence))} · out £${fmt(BigInt(movement.transfers.out_pence))} · ` +
+        `Unmatched legs ${DATA.movement.transfers.unmatched_count}. ` + DATA.warnings.join('; ');
+      document.getElementById('gridLoading').style.display = 'none';
+      document.getElementById('gridTable').style.display = '';
+    } catch (error) {
+      DATA = null;
+      document.getElementById('gridTable').style.display = 'none';
+      document.getElementById('gridLoading').textContent = 'Unable to load planning: ' + error.message;
+      document.getElementById('btnDownload').disabled = true;
+    }
   }
 
   function buildFilters() {
@@ -132,6 +157,8 @@
     const months = DATA.months;
     const cats = DATA.categories;
     const nMonths = months.length;
+    const completeMonths = new Set(DATA.complete_months);
+    const denominator = BigInt(completeMonths.size);
 
     // ── thead ──
     let headHtml = '<tr><th>Category</th>';
@@ -139,59 +166,58 @@
       headHtml += `<th class="rotate">${m}</th>`;
     });
     headHtml += '<th class="total-col">Row Total</th>';
-    headHtml += '<th class="avg-col">Avg / Month</th>';
-    headHtml += '<th class="avg-col">Median / Month</th></tr>';
+    headHtml += '<th class="avg-col">Avg / Complete Month</th>';
+    headHtml += '<th class="avg-col">Median / Complete Month</th></tr>';
     document.getElementById('gridHead').innerHTML = headHtml;
 
     // ── tbody ──
-    const colTotals = new Array(nMonths).fill(0);
-    let grandTotal = 0;
-    let grandAvgSum = 0;
-    const activeMonthTotals = new Array(nMonths).fill(0);  // for median footer
+    const colTotals = new Array(nMonths).fill(0n);
+    const activeMonthTotals = new Array(nMonths).fill(0n);  // for median footer
     let bodyHtml = '';
 
     cats.forEach(cat => {
       const active = checked[cat];
       const cls = active ? '' : ' class="excluded"';
-      let rowTotal = 0;
-      let rowHtml = `<tr${cls}><td class="cat-name">${cat}</td>`;
+      let rowTotal = 0n;
+      let rowHtml = `<tr${cls}><td class="cat-name">${escHtml(cat)}</td>`;
 
       const monthVals = [];
       months.forEach((m, i) => {
-        const v = (DATA.grid[cat] || {})[m] || 0;
+        const v = BigInt((DATA.grid_pence_text[cat] || {})[m] || '0');
         monthVals.push(v);
         rowTotal += v;
         if (active) colTotals[i] += v;
         rowHtml += `<td class="num">${v > 0 ? fmt(v) : '—'}</td>`;
       });
 
-      const avg = nMonths > 0 ? rowTotal / nMonths : 0;
-      const med = median(monthVals);
+      const coveredValues = monthVals.filter((v, i) => completeMonths.has(months[i]));
+      const averageNumerator = coveredValues.reduce((a, b) => a + b, 0n);
+      const med = median(coveredValues);
       if (active) {
-        grandTotal += rowTotal; grandAvgSum += avg;
         monthVals.forEach((v, i) => { activeMonthTotals[i] += v; });
       }
 
       rowHtml += `<td class="num total-col">${fmt(rowTotal)}</td>`;
-      rowHtml += `<td class="num avg-col">${fmt(avg)}</td>`;
-      rowHtml += `<td class="num avg-col">${fmt(med)}</td>`;
+      rowHtml += `<td class="num avg-col">${fmt(averageNumerator, denominator)}</td>`;
+      rowHtml += `<td class="num avg-col">${med}</td>`;
       rowHtml += '</tr>';
       bodyHtml += rowHtml;
     });
     document.getElementById('gridBody').innerHTML = bodyHtml;
 
     // ── tfoot ──
-    let colTotalSum = 0;
+    let colTotalSum = 0n;
     let footHtml = '<tr class="totals-row"><td class="cat-name">Total (selected)</td>';
     months.forEach((m, i) => {
       footHtml += `<td class="num">${fmt(colTotals[i])}</td>`;
       colTotalSum += colTotals[i];
     });
-    const grandAvg = nMonths > 0 ? colTotalSum / nMonths : 0;
+    const coveredTotals = activeMonthTotals.filter((v, i) => completeMonths.has(months[i]));
+    const grandAvg = fmt(coveredTotals.reduce((a, b) => a + b, 0n), denominator);
     footHtml += `<td class="num total-col">${fmt(colTotalSum)}</td>`;
-    const grandMedian = median(activeMonthTotals);
-    footHtml += `<td class="num avg-col">${fmt(grandAvg)}</td>`;
-    footHtml += `<td class="num avg-col">${fmt(grandMedian)}</td>`;
+    const grandMedian = median(coveredTotals);
+    footHtml += `<td class="num avg-col">${grandAvg}</td>`;
+    footHtml += `<td class="num avg-col">${grandMedian}</td>`;
     footHtml += '</tr>';
     document.getElementById('gridFoot').innerHTML = footHtml;
 
@@ -200,10 +226,10 @@
     document.getElementById('summaryCard').innerHTML = `
       <div class="metric"><div class="value">${checkedCount} / ${cats.length}</div>
         <div class="label">Categories Selected</div></div>
-      <div class="metric"><div class="value">${nMonths}</div>
-        <div class="label">Months of Data</div></div>
-      <div class="metric"><div class="value green">&pound;${fmt(grandAvg)}</div>
-        <div class="label">Avg Monthly Spend (selected)</div></div>
+      <div class="metric"><div class="value">${completeMonths.size} / ${nMonths}</div>
+        <div class="label">Common complete / displayed months</div></div>
+      <div class="metric"><div class="value green">&pound;${grandAvg}</div>
+        <div class="label">Avg adjusted debits / complete month (selected)</div></div>
       <div class="metric"><div class="value" style="color:#60a5fa;">&pound;${fmt(colTotalSum)}</div>
         <div class="label">Total Spend (selected)</div></div>
     `;
@@ -226,8 +252,8 @@
     selectedCats.forEach(cat => {
       const cells = [esc(cat)];
       months.forEach(m => {
-        const v = (DATA.grid[cat] || {})[m] || 0;
-        cells.push(v > 0 ? v.toFixed(2) : '0.00');
+        const v = BigInt((DATA.grid_pence_text[cat] || {})[m] || '0');
+        cells.push(fmt(v).replace(/,/g, ''));
       });
       rows.push(cells.join(','));
     });

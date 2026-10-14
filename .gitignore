@@ -1,5 +1,8 @@
-# Sensitive / large files — bank statement PDFs
-StatementsPDF/*.pdf
+# Sensitive statement sources, including nested account folders
+StatementsPDF/
+
+# Downloaded bank transaction files (personal financial data)
+TransactionsCSV/
 
 # Parser output exports
 finance/exports/
@@ -9,10 +12,15 @@ finance/ledger.db
 finance/ledger.db-wal
 finance/ledger.db-shm
 
+# Unencrypted local ledger/config snapshots (sensitive)
+finance/backups/
+
 # Generated reports
 finance/reports/
 
 # Python
+.venv/
+.venv-agent/
 __pycache__/
 *.pyc
 *.pyo

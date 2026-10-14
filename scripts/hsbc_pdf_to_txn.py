@@ -47,11 +47,17 @@ from scripts.hsbc_parser.parser import (  # noqa: F401
     parse_lines_to_transactions,
 )
 from scripts.hsbc_parser.exporters import write_output  # noqa: F401
+from scripts.services.extraction import extract_statement
 
 logger = logging.getLogger("hsbc_parser")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Exit 0: reconciled; 1: extraction/failure; 2: review/unavailable evidence.
+
+    Explicit exports retain their legacy schema. Review/unavailable exports are
+    diagnostics, not verified import candidates; failed results are not exported.
+    """
     p = argparse.ArgumentParser(
         description="Convert an HSBC UK statement PDF into normalized transactions.",
     )
@@ -88,40 +94,60 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
     outdir = Path(args.outdir)
 
-    extractor_diag: Optional[WordExtractorDiagnostics] = None
-    if args.extractor == "words":
-        lines, extractor_diag = parse_pdf_to_lines_words(str(pdf_path))
-        if not lines:
-            lines = parse_pdf_to_lines(str(pdf_path))
-            extractor_diag = None
-    else:
-        lines = parse_pdf_to_lines(str(pdf_path))
-
-    indexed_all_lines = _index_lines(lines)
-    statement_totals = _extract_statement_totals(indexed_all_lines)
-    txns, warnings, used_row_refs, recon_gaps = parse_lines_to_transactions(
-        lines, source_file=str(pdf_path), account_id=args.account_id
-    )
+    try:
+        result = extract_statement(pdf_path, account_id=args.account_id, extractor=args.extractor)
+    except Exception as exc:
+        # PDF libraries expose several exception types. Do not echo raw parser
+        # content or a traceback into a dashboard/batch runner's error stream.
+        logger.error('Error: PDF extraction failed (%s)', type(exc).__name__)
+        return 1
+    txns = result.transactions
+    reconciliation = result.reconciliation
+    if not args.quiet:
+        metrics = {
+            'transaction_count': len(txns),
+            'total_credits': format(reconciliation.parsed_totals['payments_in'], '.2f'),
+            'total_debits': format(-reconciliation.parsed_totals['payments_out'], '.2f'),
+            'net': format(reconciliation.parsed_totals['net'], '.2f'),
+            'any_parse_warnings_count': len(result.warnings),
+            'suspects_count': len(result.suspects),
+            'reconciliation_status': reconciliation.status,
+        }
+        for evidence, metric in (
+            ('payments_in', 'diff_credits_vs_statement_in'),
+            ('payments_out', 'diff_debits_vs_statement_out'),
+            ('balance_movement', 'diff_txn_delta_vs_statement_delta'),
+        ):
+            if evidence in reconciliation.differences:
+                metrics[metric] = format(reconciliation.differences[evidence], '.2f')
+        for key, value in metrics.items():
+            print(f'{key}: {value}')
 
     if len(txns) < args.min_txns:
-        raise RuntimeError(
-            f"Only {len(txns)} transactions found (minimum: {args.min_txns}). "
-            "Extraction likely failed (PDF may be scanned/image-based). OCR not implemented in v1."
+        logger.error('Error: only %d transactions found (minimum: %d); extraction requires review',
+                     len(txns), args.min_txns)
+        return 1
+    if reconciliation.status == 'failed':
+        logger.error('Error: statement reconciliation failed; no exports written')
+        return 1
+
+    try:
+        write_output(
+            outdir=outdir,
+            base=pdf_path.stem,
+            txns=txns,
+            warnings=result.warnings,
+            used_row_refs=result.used_row_refs,
+            recon_gaps=result.recon_gaps,
+            indexed_all_lines=result.indexed_all_lines,
+            statement_totals={k: float(v) for k, v in result.statement_totals.items()},
+            extractor_diag=result.extractor_diag,
         )
+    except OSError as exc:
+        logger.error('Error: export failed (%s); partial diagnostic files may exist', type(exc).__name__)
+        return 1
 
-    write_output(
-        outdir=outdir,
-        base=pdf_path.stem,
-        txns=txns,
-        warnings=warnings,
-        used_row_refs=used_row_refs,
-        recon_gaps=recon_gaps,
-        indexed_all_lines=indexed_all_lines,
-        statement_totals=statement_totals,
-        extractor_diag=extractor_diag,
-    )
-
-    return 0
+    return 0 if reconciliation.status == 'passed' else 2
 
 
 if __name__ == "__main__":

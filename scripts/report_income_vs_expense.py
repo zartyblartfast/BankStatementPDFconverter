@@ -8,14 +8,17 @@ in the browser.  The report contains from/to month dropdowns so all
 date filtering happens client-side — no need for CLI date arguments.
 """
 
-import json
+from scripts.report_assets import script_json
+from scripts.report_data import ReportRows
 import re
 import sqlite3
 import webbrowser
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "finance" / "ledger.db"
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "finance" / "reports"
+from scripts.settings import get_settings
+
+DB_PATH = get_settings().db_path
+REPORTS_DIR = get_settings().reports_dir
 
 
 def _connect() -> sqlite3.Connection:
@@ -32,44 +35,27 @@ def _statement_date(source_file: str) -> str:
     return m.group(1) if m else 'unknown'
 
 
-def _query_all() -> tuple[list[dict], list[str]]:
+def _query_all() -> tuple[ReportRows, list[str]]:
     """Return (transactions, sorted_statement_dates).
 
     Each transaction includes a statement_date (YYYY-MM-DD) derived from source_file.
     """
-    conn = _connect()
-    rows = conn.execute("""
-        SELECT t.txn_id,
-               t.txn_date        AS date,
-               substr(t.txn_date, 1, 7) AS month,
-               t.amount,
-               t.merchant_core   AS merchant,
-               c.name            AS category,
-               s.name            AS subcategory,
-               t.excluded,
-               t.exclude_reason,
-               t.user_note,
-               t.source_file
-        FROM transactions t
-        JOIN subcategories s ON t.subcategory_id = s.subcategory_id
-        JOIN categories c    ON s.category_id    = c.category_id
-        ORDER BY t.txn_date
-    """).fetchall()
-    conn.close()
-
-    txns = []
-    for r in rows:
-        d = dict(r)
-        d['statement_date'] = _statement_date(d.pop('source_file'))
-        txns.append(d)
-    months = sorted({t['statement_date'] for t in txns})
-    return txns, months
+    from scripts.report_data import query_report
+    return query_report(db_path=DB_PATH)
 
 
 def _build_html(txns: list[dict], all_months: list[str]) -> str:
+    from scripts.report_data import ReportRows
+    from scripts.report_assets import build_policy_report, localize_report_html
+    if isinstance(txns, ReportRows):
+        return build_policy_report(txns, all_months, 'income_vs_expense')
+    return localize_report_html(_build_legacy_html(txns, all_months))
+
+
+def _build_legacy_html(txns: list[dict], all_months: list[str]) -> str:
     """Build the fully-interactive HTML report."""
-    txns_json = json.dumps(txns)
-    months_json = json.dumps(all_months)
+    txns_json = script_json(txns)
+    months_json = script_json(all_months)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -77,7 +63,8 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Income vs Expenditure</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/vendor/chart.umd-4.4.8.js"></script>
+<script src="/static/report-client.js"></script>
 <style>
   html, body {{ margin:0; padding:0; overflow-x:hidden; overflow-y:auto; }}
   body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -213,6 +200,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 <body>
 
 <h1>Income vs Expenditure</h1>
+<p class="subtitle">For editing, open this report through the <a href="http://127.0.0.1:5000/report">local dashboard</a>. Standalone HTML file editing is unsupported.</p>
 <p class="subtitle" id="subtitle"></p>
 
 <div class="date-bar">
@@ -272,8 +260,8 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 </div>
 
 <script>
-// ── API base URL (works from file://, iframe, proxy, or direct) ──
-const API_BASE = (window.location.protocol === 'file:') ? 'http://127.0.0.1:5000' : '';
+// Same-origin local dashboard only; no file: mutation fallback.
+const API_BASE = '';
 
 // ── DATA ──
 const ALL_TXNS   = {txns_json};
@@ -678,7 +666,7 @@ let _rcTxnId = null;
 async function loadCatTree() {{
   if (_catTree) return _catTree;
   try {{
-    const r = await fetch(API_BASE + '/api/categories');
+    const r = await ledgerFetch('/api/categories');
     _catTree = await r.json();
   }} catch(e) {{ _catTree = {{tree:{{}}, id_map:{{}}}}; }}
   return _catTree;
@@ -769,7 +757,7 @@ async function saveRecat() {{
   }};
 
   try {{
-    const r = await fetch(API_BASE + '/api/recategorize', {{
+    const r = await ledgerFetch('/api/recategorize', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body)
@@ -841,7 +829,7 @@ function openNoteEditor(noteBtn) {{
   async function save() {{
     const note = inp.value.trim();
     try {{
-      const r = await fetch(API_BASE + '/api/update-note', {{
+      const r = await ledgerFetch('/api/update-note', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{txn_id: parseInt(txnId), note: note}})
@@ -900,7 +888,8 @@ def main():
         print("No data found in ledger.")
         return
 
-    html = _build_html(txns, months)
+    from scripts.report_assets import standalone_report_html
+    html = standalone_report_html(_build_html(txns, months))
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = REPORTS_DIR / "income_vs_expense.html"

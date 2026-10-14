@@ -1,6 +1,7 @@
 import unittest
 
 from scripts.hsbc_pdf_to_txn import (
+    _extract_statement_totals,
     _interpret_money_tokens,
     _is_noise_line,
     _looks_like_balance_marker,
@@ -36,6 +37,23 @@ class TestRepairSplitMoneyTokens(unittest.TestCase):
 
     def test_no_merge_unrelated_tokens(self):
         self.assertEqual(_repair_split_money_tokens(["hello", "world"]), ["hello", "world"])
+
+
+class TestStatementTotalsExtraction(unittest.TestCase):
+    def test_split_opening_balance_decimal_is_repaired(self):
+        totals = _extract_statement_totals([
+            (1, 11, "OpeningBalance £28,953.1 8"),
+            (1, 12, "Payments In £5,933.74"),
+            (1, 13, "Payments Out £1,897.18"),
+            (1, 14, "ClosingBalance £32,989.74"),
+        ])
+
+        self.assertEqual(totals, {
+            "opening_balance": 28953.18,
+            "payments_in": 5933.74,
+            "payments_out": 1897.18,
+            "closing_balance": 32989.74,
+        })
 
 
 class TestLooksLikeBalanceMarker(unittest.TestCase):
@@ -296,6 +314,28 @@ class TestBalanceMarkerFiltering(unittest.TestCase):
 
 
 class TestHsbcPdfToTxn(unittest.TestCase):
+    def _assert_unfinished_eof_warning(self, unfinished):
+        complete = [
+            (1, '01 Jan 26 CR SYNTHETIC CREDIT 100.00'),
+            (1, '02 Jan 26 VIS SYNTHETIC SHOP 30.00'),
+        ]
+        expected_txns, _, _, _ = parse_lines_to_transactions(complete, source_file='dummy.pdf')
+        for tail in ([], [(3, 'WRAPPED DESCRIPTION'), (4, 'Your Statement for January')]):
+            with self.subTest(tail=tail):
+                lines = complete + [(3, 'Your Statement for January'), (3, unfinished)] + tail
+                txns, warnings, used_row_refs, gaps = parse_lines_to_transactions(
+                    lines, source_file='dummy.pdf')
+                self.assertEqual(txns, expected_txns)
+                self.assertEqual(warnings, [f'3:2 | no amounts found | {unfinished}'])
+                self.assertIn('3:2', used_row_refs)
+                self.assertEqual(gaps, [])
+
+    def test_dated_unfinished_transaction_at_eof_warns_once_at_source_row(self):
+        self._assert_unfinished_eof_warning('03 Jan 26 CR SYNTHETIC INCOMPLETE')
+
+    def test_undated_unfinished_transaction_at_eof_warns_once_at_source_row(self):
+        self._assert_unfinished_eof_warning('DD SYNTHETIC INCOMPLETE')
+
     def test_parse_three_money_columns_and_wrapped_description(self):
         lines = [
             (1, "Date Description Money Out Money In Balance"),
@@ -346,6 +386,29 @@ class TestHsbcPdfToTxn(unittest.TestCase):
 
         self.assertEqual(txns[2].txn_date, "2026-01-03")
         self.assertEqual(txns[2].amount, -50.0)
+
+    def test_multiline_fx_transaction_uses_gbp_visa_rate_not_foreign_amount(self):
+        lines = [
+            (1, "Date Description Money Out Money In Balance"),
+            (1, "01 Jan 26 OPENING BALANCE 0.00 0.00 1000.00"),
+            (1, "02 Jan 26 VIS INT'L 0080510087"),
+            (1, "OPENAI *CHATGPT SU"),
+            (1, "OPENAI.COM"),
+            (1, "USD 109.70"),
+            (1, "@1.3481 Visa Rate 81.37"),
+            (1, "DR Non-Sterling"),
+            (1, "Transaction Fee 2.23 916.40"),
+        ]
+
+        txns, warnings, _used_row_refs, recon_gaps = parse_lines_to_transactions(
+            lines, source_file="dummy.pdf"
+        )
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(recon_gaps, [])
+        self.assertEqual(len(txns), 2)
+        self.assertAlmostEqual(txns[0].amount, -81.37)
+        self.assertAlmostEqual(txns[1].amount, -2.23)
 
 
 class TestFxRateLineRegex(unittest.TestCase):

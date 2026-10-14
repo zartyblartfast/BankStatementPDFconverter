@@ -12,6 +12,7 @@ license = {text = "MIT"}
 dependencies = [
     "pdfplumber>=0.10",
     "flask>=3.0",
+    "waitress==3.0.2",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +23,7 @@ dev = [
 
 [project.scripts]
 hsbc-pdf-to-txn = "scripts.hsbc_pdf_to_txn:main"
-ledger-dashboard = "scripts.dashboard:main"
+ledger-dashboard = "scripts.serve_dashboard:main"
 
 [tool.setuptools.packages.find]
 include = ["scripts*", "templates*", "config*"]

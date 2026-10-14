@@ -8,26 +8,36 @@ a summary table, horizontal bar chart, and donut chart.
 Income is broken down by subcategory (source).
 """
 
-import json
+from scripts.report_assets import script_json
 import webbrowser
 from pathlib import Path
 
 from scripts.report_income_vs_expense import _query_all
 
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "finance" / "reports"
+from scripts.settings import get_settings
+
+REPORTS_DIR = get_settings().reports_dir
 
 
 def _build_html(txns: list[dict], all_months: list[str]) -> str:
+    from scripts.report_data import ReportRows
+    from scripts.report_assets import build_policy_report, localize_report_html
+    if isinstance(txns, ReportRows):
+        return build_policy_report(txns, all_months, 'income_by_category')
+    return localize_report_html(_build_legacy_html(txns, all_months))
+
+
+def _build_legacy_html(txns: list[dict], all_months: list[str]) -> str:
     """Build the Income by Category HTML report."""
-    txns_json = json.dumps(txns)
-    months_json = json.dumps(all_months)
+    txns_json = script_json(txns)
+    months_json = script_json(all_months)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Income by Source</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/vendor/chart.umd-4.4.8.js"></script>
 <style>
   html, body {{ margin:0; padding:0; overflow-x:hidden; overflow-y:auto; }}
   body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -317,7 +327,8 @@ def main():
         print("No data found in ledger.")
         return
 
-    html = _build_html(txns, months)
+    from scripts.report_assets import standalone_report_html
+    html = standalone_report_html(_build_html(txns, months))
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = REPORTS_DIR / "income_by_category.html"

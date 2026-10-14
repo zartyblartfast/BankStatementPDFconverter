@@ -23,7 +23,9 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "finance" / "ledger.db"
+from scripts.settings import get_settings
+
+DB_PATH = get_settings().db_path
 
 
 def _connect() -> sqlite3.Connection:

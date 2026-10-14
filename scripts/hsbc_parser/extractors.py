@@ -20,8 +20,14 @@ def _import_pdfplumber():
         import pdfplumber  # type: ignore
         return pdfplumber
     except ModuleNotFoundError as e:
+        if e.name == "pdfplumber":
+            raise ModuleNotFoundError(
+                "Missing dependency 'pdfplumber'. "
+                "Install requirements.txt before running PDF extraction."
+            ) from e
+        # A sub-dependency of pdfplumber is missing — surface the real name
         raise ModuleNotFoundError(
-            "Missing dependency 'pdfplumber'. Install requirements.txt before running PDF extraction."
+            f"pdfplumber dependency missing: {e.name} — {e}"
         ) from e
 
 

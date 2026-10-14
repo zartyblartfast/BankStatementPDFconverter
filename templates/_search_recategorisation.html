@@ -1,0 +1,18 @@
+<dialog id="searchRecategory" aria-labelledby="searchRecategoryTitle" style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:12px;padding:24px;width:min(500px,90vw);max-height:85vh;overflow:auto">
+  <form id="searchRecategoryForm">
+    <h2 id="searchRecategoryTitle">Re-categorise transaction</h2>
+    <p id="searchRecategoryTransaction" style="margin-bottom:12px;overflow-wrap:anywhere"></p>
+    <p class="muted" style="margin-bottom:12px">Only this transaction will change. No matching transactions or remembered rules will be updated.</p>
+    <label for="searchRecategoryCategory">Category</label>
+    <select id="searchRecategoryCategory" required style="display:block;width:100%;margin:6px 0 12px"></select>
+    <label for="searchRecategorySubcategory">Subcategory</label>
+    <select id="searchRecategorySubcategory" required style="display:block;width:100%;margin:6px 0 12px"></select>
+    <p class="muted" style="font-size:.8rem;margin-bottom:12px">Need a new category or subcategory? Close this dialog and use Manage categories.</p>
+    <p id="searchRecategoryStatus" role="status" aria-live="polite" style="margin-bottom:12px"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="searchRecategoryClose" type="button" class="btn">Cancel</button>
+      <button id="searchRecategorySave" type="submit" class="btn btn-primary">Save this transaction</button>
+    </div>
+  </form>
+</dialog>
+<style>#searchRecategory::backdrop {background:rgba(0,0,0,.65);}</style>

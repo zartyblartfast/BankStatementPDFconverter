@@ -19,15 +19,10 @@ from pathlib import Path
 
 from scripts.init_db import DB_PATH, init_db
 
-CATEGORISED_CSV = (
-    Path(__file__).resolve().parent.parent
-    / "finance"
-    / "exports"
-    / "transactions_categorised.csv"
-)
-CATEGORIES_JSON = (
-    Path(__file__).resolve().parent.parent / "config" / "categories.json"
-)
+from scripts.settings import get_settings
+
+CATEGORISED_CSV = get_settings().exports_dir / "transactions_categorised.csv"
+CATEGORIES_JSON = get_settings().categories_path
 
 
 def _build_import_hash(txn_date: str, amount: str, description_raw: str,

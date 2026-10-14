@@ -21,13 +21,25 @@
 
 {% block content %}
 <h1>Exceptions</h1>
+<button type="button" id="manageCategories" class="btn btn-sm" style="float:right" data-csrf="{{ csrf_token() }}">Manage categories</button>
+{% include '_category_manager.html' %}
 <p class="subtitle">Transactions that need manual category assignment</p>
 
 {% if exceptions %}
-<div class="card">
+<div class="card" style="position:sticky;top:0;z-index:2;padding:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+  <span id="selectionCount">0 selected</span>
+  <label>Category <select id="batchCategory"><option value="">— Select —</option>{% for cat in categories %}<option>{{ cat }}</option>{% endfor %}</select></label>
+  <label>Subcategory <select id="batchSubcategory" disabled><option value="">— Select —</option></select></label>
+  <button id="batchApply" class="btn btn-success btn-sm" disabled>Apply selected</button>
+  <button id="clearSelection" class="btn btn-sm">Clear selection</button>
+  <small class="muted">No transactions are applied automatically. Selected-row application does not save future rules; Remember remains a separate per-row option.</small>
+  <span id="batchMessage" role="status" aria-live="polite"></span>
+</div>
+<div class="card" style="overflow-x:auto">
   <table>
     <thead>
       <tr>
+        <th>Select</th>
         <th>Date</th>
         <th>Merchant</th>
         <th>Description</th>
@@ -38,8 +50,18 @@
       </tr>
     </thead>
     <tbody>
-    {% for exc in exceptions %}
+    {% for group in groups %}
+      <tr class="merchant-heading" data-group="{{ loop.index }}"><td colspan="8" style="border-top:1px solid #475569;padding-top:16px">
+        <strong>{{ group.merchant }}</strong> <span class="muted">· {{ group.rows|length }} transactions</span>
+        <button type="button" class="select-merchant btn btn-sm" data-group="{{ loop.index }}">Select this merchant</button>
+        <div class="muted" style="font-size:.8rem;margin-top:5px">Previous assignments (exact merchant match):
+          {% for prior in group.history %}{{ prior.category }} / {{ prior.subcategory }} ({{ prior.count }}){% if not loop.last %}; {% endif %}{% else %}No previous assignment{% endfor %}
+        </div>
+      </td></tr>
+      {% set group_number = loop.index %}
+    {% for exc in group.rows %}
       <tr class="exc-row" id="exc-{{ exc.exception_id }}" data-merchant="{{ exc.merchant_core }}">
+        <td><input type="checkbox" class="row-select" data-group="{{ group_number }}" value="{{ exc.exception_id }}" aria-label="Select transaction {{ exc.txn_date }} {{ exc.merchant_core }} {{ exc.amount }}" {% if exc.type != 'uncategorised' %}disabled{% endif %}></td>
         <td class="muted">{{ exc.txn_date }}</td>
         <td class="exc-merchant">{{ exc.merchant_core }}</td>
         <td class="exc-desc" title="{{ exc.description_raw }}">{{ exc.description_raw }}</td>
@@ -72,6 +94,7 @@
         </td>
       </tr>
     {% endfor %}
+    {% endfor %}
     </tbody>
   </table>
 </div>
@@ -95,6 +118,7 @@ document.querySelectorAll('.cat-select').forEach(sel => {
     const excId = sel.dataset.exc;
     const subSel = document.querySelector(`.sub-select[data-exc="${excId}"]`);
     const applyBtn = document.querySelector(`.apply-btn[data-exc="${excId}"]`);
+    applyBtn.disabled = true;
     subSel.innerHTML = '<option value="">— Select —</option>';
 
     const cat = sel.value;
@@ -139,7 +163,7 @@ document.querySelectorAll('.apply-btn').forEach(btn => {
     try {
       const resp = await fetch('/api/resolve-exception', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token() | tojson }} },
         body: JSON.stringify({
           exception_id: parseInt(excId),
           category: cat,
@@ -152,9 +176,13 @@ document.querySelectorAll('.apply-btn').forEach(btn => {
 
       if (data.ok) {
         row.classList.add('resolved');
+        const cb = row.querySelector('.row-select');
+        if (cb) { cb.checked = false; cb.disabled = true; }
+        updateSelection();
         btn.textContent = '✓ Done';
         btn.className = 'btn btn-sm';
         btn.style.color = '#22c55e';
+        if (data.warning) alert(data.warning);
 
         // If bulk resolved, mark other rows with same merchant
         if (data.bulk_resolved && data.bulk_resolved.length > 0) {
@@ -190,5 +218,65 @@ document.querySelectorAll('.apply-btn').forEach(btn => {
     }
   });
 });
+
+const selectionBoxes = () => Array.from(document.querySelectorAll('.row-select:checked:not(:disabled)'));
+function updateSelection() {
+  const count = selectionBoxes().length;
+  document.getElementById('selectionCount').textContent = `${count} selected`;
+  document.getElementById('batchApply').textContent = `Apply to ${count} selected`;
+  document.getElementById('batchApply').disabled = !count || !document.getElementById('batchSubcategory').value;
+}
+if (document.getElementById('batchApply')) {
+  document.querySelectorAll('.row-select').forEach(cb => cb.addEventListener('change',updateSelection));
+  document.querySelectorAll('.select-merchant').forEach(button => button.addEventListener('click', () => {
+    document.querySelectorAll(`.row-select[data-group="${button.dataset.group}"]:not(:disabled)`).forEach(cb => cb.checked = true);
+    updateSelection();
+  }));
+  document.getElementById('clearSelection').addEventListener('click', () => {
+    document.querySelectorAll('.row-select').forEach(cb => cb.checked = false); updateSelection();
+  });
+  document.getElementById('batchCategory').addEventListener('change',event => {
+    const sub = document.getElementById('batchSubcategory');
+    sub.replaceChildren(new Option('— Select —',''));
+    (CAT_TREE[event.target.value] || []).forEach(name => sub.add(new Option(name,name)));
+    sub.disabled = !event.target.value; updateSelection();
+  });
+  document.getElementById('batchSubcategory').addEventListener('change',updateSelection);
+  document.getElementById('batchApply').addEventListener('click',async () => {
+    const boxes = selectionBoxes();
+    const category = document.getElementById('batchCategory').value;
+    const subcategory = document.getElementById('batchSubcategory').value;
+    if (!boxes.length || !subcategory) return;
+    if (!confirm(`Apply ${category} / ${subcategory} to exactly ${boxes.length} selected transactions? No other rows or future rules will change.`)) return;
+    const btn = document.getElementById('batchApply'); btn.disabled = true;
+    const message = document.getElementById('batchMessage');
+    try {
+      const response = await fetch('/api/resolve-selected-exceptions', {
+        method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':{{ csrf_token()|tojson }}},
+        body:JSON.stringify({exception_ids:boxes.map(cb=>Number(cb.value)),category,subcategory})
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Application failed.');
+      data.resolved_ids.forEach(id => {
+        const row = document.getElementById('exc-'+id);
+        row.classList.add('resolved');
+        row.querySelectorAll('input,select,button').forEach(el => el.disabled = true);
+        row.querySelector('.row-select').checked = false;
+        row.querySelector('.apply-btn').textContent = '✓ Done';
+        const cat = row.querySelector('.cat-select'); cat.value = category;
+        const sub = row.querySelector('.sub-select');
+        sub.replaceChildren(new Option(subcategory,subcategory)); sub.value = subcategory;
+      });
+      const remaining = document.querySelectorAll('.exc-row:not(.resolved)').length;
+      const badge = document.querySelector('nav .badge');
+      if (badge) { badge.textContent = remaining || '✓'; if (!remaining) badge.className='badge badge-ok'; }
+      message.textContent = data.warning || `Applied to ${data.resolved_ids.length} selected transactions.`;
+    } catch(error) {
+      message.textContent = `${error.message} Reload before retrying if the connection was lost.`;
+    } finally { updateSelection(); }
+  });
+}
+
 </script>
+<script src="{{ url_for('static', filename='category_manager.js') }}"></script>
 {% endblock %}

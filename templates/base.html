@@ -79,7 +79,7 @@
 
 <nav>
   <a href="/" class="brand">Ledger Dashboard</a>
-  <a href="/ingest" class="{% if active_page == 'ingest' %}active{% endif %}">Ingest PDF</a>
+  <a href="/ingest" class="{% if active_page == 'ingest' %}active{% endif %}">Import Statements</a>
   <a href="/exceptions" class="{% if active_page == 'exceptions' %}active{% endif %}">
     Exceptions
     {% if exception_count and exception_count > 0 %}
@@ -88,8 +88,10 @@
       <span class="badge badge-ok">✓</span>
     {% endif %}
   </a>
+  <a href="/transactions" class="{% if active_page == 'transactions' %}active{% endif %}">Transaction search</a>
   <a href="/planning" class="{% if active_page == 'planning' %}active{% endif %}">Expenditure Planning</a>
   <a href="/report" class="{% if active_page == 'report' %}active{% endif %}">Report</a>
+  <a href="/safety" class="{% if active_page == 'safety' %}active{% endif %}">Safety</a>
 </nav>
 
 <div class="container">

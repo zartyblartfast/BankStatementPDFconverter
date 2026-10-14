@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Safety · Ledger Dashboard{% endblock %}
+{% block content %}
+<h1>Local data safety</h1>
+<p class="subtitle">Loopback dashboard · 127.0.0.1 · Financial data stays on this computer</p>
+<div class="card">
+  <h2>Local-first runtime</h2>
+  <p>No migrations or imports run when you open this page or start the server. There is no remote authentication support: do not expose this app to a network or proxy.</p>
+  <p>Backup operations pause edits made through this dashboard. Close other ledger/config editors before a snapshot: unrelated processes are not coordinated.</p>
+</div>
+<div class="card">
+  <h2>Recovery boundary</h2>
+  <p class="amber">These are <strong>unencrypted local snapshots</strong>, not encrypted disaster recovery.</p>
+  <p>Keep encrypted off-device backups separately. Source PDFs and CSVs are not included; protect and back up those separately too.</p>
+  <form method="post" action="{{ url_for('safety_backup') }}" style="margin-top:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-primary" type="submit">Create and validate local snapshot</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Snapshots · {{ records|length }}</h2>
+  <table><thead><tr><th>Created (UTC)</th><th>Validation</th><th>Record counts</th></tr></thead>
+  <tbody>{% for record in records %}<tr>
+    <td>{{ record.created_at }}</td><td>{{ record.status }}</td>
+    <td>{% for table, count in record.counts.items() %}{{ table }}: {{ count }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+  </tr>{% else %}<tr><td colspan="3">No local snapshots yet.</td></tr>{% endfor %}</tbody></table>
+</div>
+<div class="card">
+  <h2>Isolated restore validation</h2>
+  <p>{{ restore_status }}</p>
+  <p>This checks the newest validated snapshot in a new temporary directory outside the live project, validates checksums and SQLite integrity, then deletes only that temporary copy. The production ledger is never overwritten. Status records contain metadata/counts, not transaction values.</p>
+  <form method="post" action="{{ url_for('safety_restore_check') }}" style="margin-top:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label><input type="checkbox" name="approve_restore" value="yes" required> I approve creating and deleting an isolated verification copy</label>
+    <br><button class="btn btn-primary" type="submit" style="margin-top:12px" {% if not records %}disabled{% endif %}>Run restore check</button>
+  </form>
+</div>
+<a class="btn btn-primary" href="/">Back to dashboard home</a>
+{% endblock %}

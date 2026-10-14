@@ -3,26 +3,85 @@
 
 {% block extra_css %}
 <style>
-  .report-bar { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  .report-bar { display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
   .report-bar label { color:#94a3b8; font-size:0.9rem; }
-  .report-bar select { background:#334155; color:#e2e8f0; border:1px solid #475569;
+  .report-bar select, .report-bar input { background:#334155; color:#e2e8f0; border:1px solid #475569;
                        border-radius:6px; padding:6px 12px; font-size:0.9rem; cursor:pointer; }
-  .report-bar select:focus { outline:none; border-color:#60a5fa; }
+  .report-bar input { cursor:text; width:9rem; }
+  .report-bar select[name="year"], .report-bar select[name="month"] { width:7.5rem; }
+  .report-bar select:focus, .report-bar input:focus { outline:none; border-color:#60a5fa; }
+  .period-card { background:#1e293b; border-radius:12px; padding:14px 18px; margin-bottom:16px; }
+  .period-card .label { color:#94a3b8; font-size:0.8rem; margin-bottom:4px; }
+  .period-card .value { color:#f8fafc; font-weight:700; }
+  .period-card .meta { color:#94a3b8; font-size:0.8rem; margin-top:4px; }
+  .period-card .error { color:#fca5a5; font-size:0.82rem; margin-bottom:6px; }
   .report-frame { width:100%; border:none; border-radius:12px;
                   background:#0f172a; min-height:600px; overflow:hidden; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="report-bar">
+<form class="report-bar" method="get" action="/report">
   <label for="reportSelect">Report:</label>
-  <select id="reportSelect">
+  <select id="reportSelect" name="name">
     {% for key, label in reports %}
     <option value="{{ key }}" {% if key == current_report %}selected{% endif %}>{{ label }}</option>
     {% endfor %}
   </select>
+
+  <label for="reportAccount">Account:</label>
+  <select id="reportAccount" name="account_id">
+    <option value="">All owned GBP accounts</option>
+    {% for account in accounts|default([]) %}
+    <option value="{{ account.account_id }}" {% if account_id == account.account_id %}selected{% endif %}>{{ account.display_name }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="periodSelect">Period:</label>
+  <select id="periodSelect" name="period">
+    <option value="all" {% if period.kind == 'all' %}selected{% endif %}>All dates</option>
+    <option value="year" {% if period.kind == 'year' %}selected{% endif %}>Full year</option>
+    <option value="month" {% if period.kind == 'month' %}selected{% endif %}>Calendar month</option>
+    <option value="custom" {% if period.kind == 'custom' %}selected{% endif %}>Custom range</option>
+  </select>
+  <span data-period-fields="year month" {% if period.kind not in ['year', 'month'] %}hidden{% endif %}>
+    <label for="periodYear">Year:</label>
+    <select id="periodYear" name="year">
+      <option value="">—</option>
+      {% for year in year_options %}
+      <option value="{{ year }}" {% if period.year|int == year %}selected{% endif %}>{{ year }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <span data-period-fields="month" {% if period.kind != 'month' %}hidden{% endif %}>
+    <label for="periodMonth">Month:</label>
+    <select id="periodMonth" name="month">
+      <option value="">—</option>
+      {% for number, name in month_options %}
+      <option value="{{ number }}" {% if period.month|int == number %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <span data-period-fields="custom" {% if period.kind != 'custom' %}hidden{% endif %}>
+    <label for="periodStart">Start:</label>
+    <input id="periodStart" name="start" type="date" value="{{ period.start }}">
+    <label for="periodEnd">End:</label>
+    <input id="periodEnd" name="end" type="date" value="{{ period.end }}">
+  </span>
+  <button class="btn btn-primary btn-sm" type="submit">Apply</button>
+</form>
+
+<div class="period-card">
+  {% if period.error %}<div class="error">{{ period.error }}</div>{% endif %}
+  <div class="label">Period</div>
+  <div class="value">{{ period.label }}</div>
+  <div class="meta">{{ period.range }} · {{ period.method }}</div>
 </div>
-<iframe class="report-frame" src="/report/raw/{{ current_report }}" id="reportFrame"></iframe>
+
+<iframe class="report-frame"
+        src="/report/raw/{{ current_report }}{% if period.query %}?{{ period.query }}{% if account_id is defined %}&amp;account_id={{ account_id|default('',true)|urlencode }}{% endif %}{% elif account_id is defined %}?account_id={{ account_id|default('',true)|urlencode }}{% endif %}"
+        id="reportFrame"
+        title="{{ current_report_label }} report"></iframe>
 {% endblock %}
 
 {% block extra_js %}
@@ -36,12 +95,19 @@ function resizeFrame() {
 }
 frame.addEventListener('load', resizeFrame);
 
-// Switch report on dropdown change
+function updatePeriodFields() {
+  const kind = document.getElementById('periodSelect').value;
+  document.querySelectorAll('[data-period-fields]').forEach(el => {
+    const fields = el.dataset.periodFields.split(' ');
+    el.hidden = !fields.includes(kind);
+  });
+}
+document.getElementById('periodSelect').addEventListener('change', updatePeriodFields);
+updatePeriodFields();
+
+// Switch report on dropdown change while preserving period fields.
 document.getElementById('reportSelect').addEventListener('change', e => {
-  const key = e.target.value;
-  frame.src = '/report/raw/' + key;
-  // Update URL without reload so bookmarks work
-  history.replaceState(null, '', '/report?name=' + key);
+  e.target.form.submit();
 });
 </script>
 {% endblock %}

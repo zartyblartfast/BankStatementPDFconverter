@@ -1,29 +1,157 @@
-# HSBC UK PDF Statement Converter & Ledger Dashboard
+# HSBC PDF Statement Converter & Multi-account Ledger Dashboard
 
-End-to-end personal finance pipeline: extract transactions from HSBC UK statement PDFs, categorise them, store in a SQLite ledger, and explore via an interactive dashboard with reports.
+Local personal finance pipeline: extract transactions from HSBC text-based statement PDFs, categorise them, store them in SQLite, and explore them through a dashboard with classic reports. The multi-account workflow supports separately configured HSBC UK and HSBC Isle of Man GBP accounts, saved statement folders, and explicitly confirmed internal transfers. Account ownership, currency and parser eligibility require reviewed setup; a fresh checkout does not create or enable those accounts.
+
+See [Multi-account setup and transfers](docs/multi-account-transfers.md) for prerequisites, import review and report semantics. Account workflow support is not blanket verification of every statement layout.
 
 ## Security
 
-- No credentials required.
+- Loopback-only local dashboard; no remote authentication support. Never expose it through a network bind or proxy.
 - Processing is entirely local — no external API calls.
 - The extractor ignores statement header data (name/address/account details) and only emits transaction rows.
-- Statement PDFs and the ledger database are gitignored.
+- The whole `StatementsPDF/` tree (including nested account folders), downloaded CSVs, ledger, exports, reports and local backups are gitignored. Ignoring files is not encryption and does not remove anything already tracked by Git.
+
+## Local safety helpers (M0)
+
+`get_settings(root=None)` in `scripts/settings.py` centralises paths for the dashboard,
+ingestion, imports, report generators, safety helpers and database initialisation. The default is this repository root, independent
+of the current working directory. `BANKSTATEMENT_PROJECT_ROOT` overrides that root;
+an explicit API/CLI root takes precedence. It includes StatementsPDF, TransactionsCSV,
+config, database, exports, reports, templates and static asset paths. Path discovery
+does not create directories or open the ledger.
+
+### Production local dashboard and Safety page
+
+Use `start_dashboard.bat`, which changes to its own project directory and uses
+`.venv/Scripts/python.exe`, or run:
+
+```bash
+uv pip install --python .venv/Scripts/python.exe -r requirements.txt
+.venv/Scripts/python.exe -m scripts.serve_dashboard --open-browser
+```
+
+Waitress 3.0.2 serves only `127.0.0.1` (default port 5000, `--port` changes it),
+without Flask debug/reloader. The launcher checks `/health` for this app and project
+identity before opening the browser; an existing matching instance is reused and an
+unrelated occupied port is refused. No hardcoded credentials are installed.
+
+All requests validate the local Host; cross-origin/cross-site requests are refused.
+Forms and JSON mutations require an unpredictable session-bound CSRF token. Report
+editing obtains it through same-origin `/api/csrf-token`; no wildcard CORS is enabled.
+The signing secret is random per process unless `BANKSTATEMENT_SESSION_SECRET` is set
+privately in the server environment; a restart may require reloading open pages.
+This is not authentication or a sandbox against malicious software on this computer.
+
+Chart.js 4.4.8 and its MIT license are in `static/vendor/`, with source/hash attribution.
+Reports load browser assets locally. Existing generated report bytes are not rewritten:
+approved legacy Chart.js references and API calls are adapted only in served responses.
+Standalone `file:` HTML editing is unsupported; open reports through `/report`.
+
+`/safety` is read-only on GET and shows snapshot verification/record counts, not
+transaction values. Explicit CSRF-protected buttons create a validated unencrypted
+snapshot or, after checkbox approval, restore the newest valid snapshot into an owned
+temporary directory outside the live project, validate it, and delete only that copy.
+Metadata/count status is stored separately in `finance/backups/state.json`.
+The trusted server setting `BANKSTATEMENT_RESTORE_CHECK_DIR` may select a dedicated
+isolated parent (never a request-supplied path); the Windows default is
+`%LOCALAPPDATA%/BankStatementPDFconverter/restore_checks`. Parents inside/containing the
+live project are refused before any writes. Dashboard mutations and snapshots share
+an in-process lock; pause unrelated external writers yourself. Startup and Safety GET
+do not migrate, import, recategorize or regenerate reports.
+
+### Backup, verification and isolated restore
+
+These backups are **unencrypted local snapshots**, not encryption or a complete
+disaster-recovery solution. They contain sensitive ledger/config data; restrict access,
+protect copies separately, and arrange encrypted/off-device backups yourself. The
+ignored default destination is `finance/backups/`. A successful snapshot includes:
+
+- `finance/ledger.db`, copied with SQLite's online backup API from a read-only source
+  connection (including committed, uncheckpointed WAL changes).
+- Required `config/categories.json` and `config/category_rules.csv` bytes; optional
+  `config/merchant_rules.json` if present.
+- `manifest.json`: format version, UTC timestamp, protection label and SHA-256 hashes.
+
+```bash
+python -m scripts.backup_ledger create [--root PROJECT_ROOT] [--db DATABASE] [--backup-dir DIRECTORY] [--name SAFE_NAME]
+python -m scripts.backup_ledger verify SNAPSHOT_DIRECTORY
+python -m scripts.backup_ledger restore SNAPSHOT_DIRECTORY --destination NEW_ISOLATED_DIRECTORY [--root LIVE_PROJECT_ROOT]
+```
+
+Python APIs: `create_backup(*, root=None, db_path=None, backup_dir=None, name=None)`
+returns the published directory; `verify_backup(backup_path)` returns the validated
+manifest; `restore_backup(backup_path, destination, *, root=None)` returns the new
+isolated directory. Existing destinations are refused; restore has no default target
+and refuses targets within the configured live project or snapshot. Snapshots are
+validated before publication/restoration (hashes, SQLite integrity and foreign keys).
+Errors remove staging directories; an interrupted process may leave a hidden partial
+directory, which is not a published/valid snapshot.
+
+Pause application/config edits while making a backup when ledger and config must be
+consistent with each other: SQLite takes a consistent database snapshot, but separate
+configuration files are not part of that database transaction. SHA-256 detects changed
+bytes relative to the manifest; it does **not** authenticate a snapshot against a
+malicious party who can replace both files and manifest.
+
+Statement PDFs, downloaded CSVs and generated exports/reports are **not included**.
+Keep source documents in separately protected storage and test recovery independently.
+Restore produces ledger/config only, not an application installation. Do not copy it
+over the live project without a separately reviewed recovery procedure.
+
+### Opt-in migrations
+
+```bash
+python -m scripts.migrate_db --db EXPLICIT_EXISTING_DATABASE --apply [--migrations-dir DIRECTORY]
+```
+
+`migrate_db(db_path, *, migrations_dir=None)` requires an explicit existing database.
+No dashboard import or startup runs migrations. Shipped migrations add import
+metadata (`001`), the account registry (`002`), saved statement folders (`003`) and
+confirmed-transfer decisions/audit (`004`). Test on an isolated database first;
+back up and review schema changes before using a live ledger. Migrations do not
+automatically provision two enabled accounts, assign folders, import statements or
+classify transfers.
+
+Migration files use positive versions and names such as `001_example.sql`; the runner
+orders numeric versions, records SHA-256 hashes of original file bytes, refuses
+changed/missing applied migrations and duplicate versions, and is idempotent. All
+pending changes and tracking are committed as one transaction or rolled back together.
+SQL transaction control, PRAGMA, ATTACH/DETACH and tracking-table access are forbidden
+inside migration files. See `scripts/migrations/README.md` for authoring constraints.
 
 ## Requirements
 
 - Python 3.11+
 - `pdfplumber` for PDF text extraction
 - `flask` for the web dashboard
+- `waitress==3.0.2` for the production loopback server
 
-Install dependencies:
+Create a local environment and install dependencies from the repository root:
 
 ```bash
-python -m pip install -r requirements.txt
+uv venv --python 3.11 .venv
+uv pip install --python .venv/Scripts/python.exe -r requirements.txt
 ```
 
 ## Quick Start
 
-### 1. Dashboard (recommended)
+### 1. Explicit database and account setup
+
+For a **new installation only**, create the base ledger, then explicitly apply the
+shipped migrations. Never use `--force` on an existing ledger:
+
+```bash
+.venv/Scripts/python.exe -m scripts.init_db
+.venv/Scripts/python.exe -m scripts.migrate_db --db finance/ledger.db --apply
+```
+
+For an existing installation, take a verified backup and rehearse migrations on an
+isolated copy before applying them to the explicitly chosen database. An empty
+ledger still has **no registered accounts** after migration. Reviewed account
+provisioning is a separate prerequisite; no account-creation wizard or provisioning
+CLI is shipped. See [the setup contract](docs/multi-account-transfers.md).
+
+### 2. Dashboard (recommended)
 
 Double-click the launcher to start the server and open your browser:
 
@@ -34,24 +162,30 @@ start_dashboard.bat
 Or run manually:
 
 ```bash
-python -m scripts.dashboard
+.venv/Scripts/python.exe -m scripts.serve_dashboard --open-browser
 ```
 
 Open http://127.0.0.1:5000 — from here you can:
 
-- **Ingest PDFs** — select a statement from `StatementsPDF/`, process it through the full pipeline
+- **Import Statements** — select an enabled account, choose and **Save folder**, then **Review Selected PDF** and explicitly approve an eligible preview; saving a folder does not import or move files
+- **Transaction search** — select exactly two page rows, **Mark as transfer**, review and **Confirm**; confirmed transfers have a separately confirmed **Undo** action
 - **Review Exceptions** — assign categories to unrecognised transactions via dropdown, with optional "Remember rule" to update `category_rules.csv` automatically
 - **View Reports** — interactive Income vs Expenditure report with dual donut charts and drill-down tables
 - **Recategorise Transactions** — click the ✎ icon on any transaction to change its category/subcategory (single or bulk), with optional rule persistence
 - **Annotate Transactions** — click the 📝 icon to add a descriptive note to any transaction (e.g. "car insurance")
 
-### 2. Command-line pipeline
+### 3. Legacy command-line utilities
+
+These utilities are not the account-aware dashboard preview/approval workflow.
+Do not use the full pipeline or CSV importer as a substitute for reviewed
+multi-account imports or edit-preserving re-imports. Filenames below are generic
+placeholders.
 
 Each step can also be run individually:
 
 ```bash
 # Step 1: Extract transactions from a PDF
-python -m scripts.hsbc_pdf_to_txn --pdf StatementsPDF/2026-01-10_Statement.pdf
+python -m scripts.hsbc_pdf_to_txn --pdf StatementsPDF/example.pdf
 
 # Step 2: Categorise all extracted transactions using rules
 python -m scripts.apply_categories
@@ -69,7 +203,7 @@ python -m scripts.report_income_vs_expense
 Or run the full pipeline for a single PDF in one step:
 
 ```bash
-python -m scripts.ingest_pipeline --pdf StatementsPDF/2026-02-10_Statement.pdf
+python -m scripts.ingest_pipeline --pdf StatementsPDF/example.pdf
 ```
 
 ## Project Structure
@@ -141,9 +275,9 @@ Additional debug exports (only written when reconciliation diffs are non-zero):
 
 ### Categorisation
 
-- **180 rules** in `config/category_rules.csv` mapping `merchant_core` to category/subcategory
-- 100% coverage across 1,028 transactions from 14 statements
+- Local rules in `config/category_rules.csv` map `merchant_core` to category/subcategory; coverage depends on the user's statements and rules
 - Rules can be added manually or via the dashboard's "Remember rule" feature
+- Categories never establish account ownership or confirm an internal transfer
 
 ### Ledger Database
 
@@ -161,17 +295,17 @@ Unusual transactions (e.g. a short-term loan) can be marked as excluded:
 
 - `excluded` flag + `exclude_reason` on each transaction
 - Reports filter out excluded transactions by default
-- "Show excluded" toggle in the report to reveal them (greyed out with strikethrough + EXCLUDED badge)
+- **Show excluded** restores raw rows to report charts and totals, including confirmed transfer principal; it is not just a visibility switch
+- Default reports exclude confirmed internal-transfer principal from income/expenditure and show **Transfers in** and **Transfers out** separately; fees remain expenditure unless separately excluded
 
-### Seamless Dedup on Re-import
+### Reviewed, edit-preserving dashboard re-import
 
-When re-processing a PDF (e.g. replacing a partial month with the full statement):
-
-1. Old transactions for that source file are deleted
-2. All transactions from the new PDF are imported fresh
-3. Any excluded flags are preserved by matching on date/amount/description
-
-No user input required — fully automatic.
+The dashboard previews account/document-scoped matches before an explicit commit.
+Safe matches retain transaction IDs, notes, categories, exclusions and audit links.
+Ambiguous changes, removals and unsafe overlaps block review rather than silently
+replacing maintained transactions. Changed data or account/folder policy can
+invalidate a held preview; review again instead of bypassing the checks. This
+contract does not apply to the legacy CLI utilities above.
 
 ### Interactive Reports
 
@@ -183,7 +317,7 @@ All reports are accessible via the **Report** tab's dropdown selector, share the
 - **Net balance indicator** between the donuts
 - **3-level drill-down tables** — Category → Subcategory → Individual transactions
 - **Sort controls** — sort transactions by date or merchant
-- **Show excluded toggle** — reveal/hide excluded transactions
+- **Show excluded toggle** — restore raw rows, charts and totals, including transfer principal
 - **Inline recategorisation** — ✎ icon opens a modal to reassign category/subcategory, with single-transaction or all-matching-merchant scope and optional rule persistence
 - **Transaction notes** — 📝 icon opens an inline text editor; saved notes appear in amber italic next to the merchant name
 
@@ -210,7 +344,8 @@ All reports are accessible via the **Report** tab's dropdown selector, share the
 Web UI at http://127.0.0.1:5000 with:
 
 - **Home** — stats overview (transactions, statements, income/expense, exceptions), import history, quick actions
-- **Ingest PDF** — select and process PDFs from `StatementsPDF/`
+- **Import Statements** — account selection, saved folders under `StatementsPDF/`, review and explicit commit
+- **Transaction search** — raw Credits/Debits include transfers; checkbox pairing, confirmation and Undo leave categories, notes and future rules unchanged
 - **Exceptions** — inline category assignment with dropdowns, bulk resolution for same-merchant transactions, "Remember rule" to auto-update `category_rules.csv`
 - **Report** — report selector dropdown with four interactive reports (Income vs Expenditure, Income by Source, Expenditure by Category, Expenditure Heatmap), embedded with dashboard nav bar
 - **Nav badge** — live count of open exceptions (amber) or green checkmark when all clear
@@ -246,11 +381,11 @@ Web UI at http://127.0.0.1:5000 with:
 - `page` (1-based)
 - `row_ref` (stable reference like `{page}:{line_index}`)
 
-## Supported HSBC statement formats (v1)
+## HSBC statement format scope
 
 ![HSBC statement example](docs/HSBC_Template_Statement.jpg)
 
-This converter targets HSBC UK *text-based* PDFs where transaction tables appear as lines containing:
+The parser targets HSBC *text-based* PDFs with the fields below. The UK/Isle of Man workflow requires reviewed GBP/parser eligibility per account; an account label or folder name alone does not verify a layout. Scanned PDFs are unsupported.
 
 - Date (e.g. `01 Jan 26` or `01/01/26`)
 - Description (may wrap onto following lines)
@@ -278,9 +413,20 @@ Notes:
 
 ## Running tests
 
+Use the installed app environment from the repository root. **Node.js (`node` on
+PATH) is required for the full test suite**, which executes the local JavaScript
+UI/report probes; it is a development/test dependency, not a dashboard runtime
+requirement. Optional MCP protocol tests additionally require `.venv-agent` and
+`requirements-agent.txt` (see `docs/agent-analysis.md`).
+
 ```bash
-python -m unittest discover -s tests -v
+.venv/Scripts/python.exe -m unittest discover -s tests -v
 ```
+
+Tests use synthetic temporary fixtures. To choose their location, set `TMPDIR` to an
+existing writable temporary directory before running tests; tests must not replace
+that caller setting. If `BANKSTATEMENT_PROJECT_ROOT` is set in your environment,
+point it at the checkout under test, not a different or live installation.
 
 ## Batch statement testing
 

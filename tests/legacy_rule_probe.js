@@ -1,0 +1,31 @@
+const fs=require('fs'), vm=require('vm'), assert=require('assert');
+const html=fs.readFileSync(process.argv[2],'utf8');
+const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map(m=>m[1]);
+const code=scripts.find(s=>s.includes('async function saveRecat()'));
+assert(code,'actual legacy correction script');
+const elements=new Map();
+for(const id of [...html.matchAll(/id="([^"]+)"/g)].map(m=>m[1])) elements.set(id,{value:'',checked:false,disabled:false,style:{},innerHTML:'',textContent:'',children:[],classList:{add(){},remove(){}},addEventListener(n,f){this[n]=f},appendChild(o){this.children.push(o); if(o.selected||!this.value)this.value=o.value},focus(){}});
+const get=id=>elements.get(id);
+// Honor the actual stored checkbox default, rather than assuming unchecked.
+if(get('rcRemember')) get('rcRemember').checked=/id="rcRemember" checked/.test(html);
+let calls=[],reloads=0;
+const c={console,ALL_TXNS:[{merchant:'SYNTHETIC'}],esc:String,setTimeout:f=>f(),window:{location:{reload(){reloads++}}},document:{getElementById:get,createElement:()=>({}),querySelector:()=>({value:'single'}),addEventListener(){}},ledgerFetch:async(path,options)=>{if(!options)return {json:async()=>({tree:{Fixture:['Test']}})}; calls.push({path,body:JSON.parse(options.body)}); return {ok:true,json:async()=>({ok:true,updated:1,warning:'Category saved; report refresh failed.'})};}};
+vm.createContext(c);vm.runInContext(code,c);
+(async()=>{
+await c.openRecatModal(1,'SYNTHETIC','Fixture','Test');
+get('rcCancel').click();assert.equal(calls.length,0,'cancel has no mutation');
+await c.openRecatModal(1,'SYNTHETIC','Fixture','Test');
+await get('rcSave').click();assert.equal(calls.length,1);
+assert.equal(calls[0].body.remember_rule,undefined,'transaction save never combines rule write');
+assert.equal(calls[0].body.scope,'single');
+assert.equal(calls[0].path,'/api/recategorize');
+assert.equal(reloads,0,'refresh warning must remain visible');
+assert.match(get('rcStatus').textContent,/saved.*refresh failed/i);
+assert(!html.includes('id="rcRemember"'),'no silently ignored Remember control');
+assert.match(html,/href="\/rules"[^>]*>[^<]*future rules/i,'separate future-rule navigation');
+const warningPayload=calls[0].body;
+c.ledgerFetch=async(path,options)=>({ok:true,json:async()=>({ok:true,updated:1})});
+await c.openRecatModal(1,'SYNTHETIC','Fixture','Test');
+await get('rcSave').click();assert.equal(reloads,1,'normal success reloads');
+console.log(JSON.stringify(warningPayload));
+})().catch(e=>{console.error(e);process.exitCode=1});

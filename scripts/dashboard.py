@@ -5,7 +5,7 @@ Usage:  python -m scripts.dashboard
 Runs a local web server at http://127.0.0.1:5000
 """
 
-import csv
+import sys
 import json
 import os
 import re
@@ -976,8 +976,19 @@ def exceptions_page():
     cat_tree = _load_cat_tree()
     categories = sorted(cat_tree.keys())
 
+    rule_candidates, rule_review_error = [], None
+    try:
+        from scripts.rule_routes import read_ledger
+        from scripts.services.category_rules import snapshot
+        from scripts.services.rule_review import candidates
+        with read_ledger(DB_PATH) as read_conn:
+            if read_conn is not None:
+                rule_candidates = candidates(read_conn, snapshot(RULES_CSV)['rules'])
+    except (ValueError, OSError) as exc:
+        rule_review_error = str(exc)
     return render_template("exceptions.html", active_page="exceptions",
-                           exceptions=exceptions, groups=groups, categories=categories, cat_tree=cat_tree)
+                           exceptions=exceptions, groups=groups, categories=categories, cat_tree=cat_tree,
+                           rule_candidates=rule_candidates, rule_review_error=rule_review_error)
 
 
 @app.route('/api/resolve-selected-exceptions', methods=['POST'])
@@ -1015,101 +1026,39 @@ def resolve_selected_exceptions():
     except Exception:
         app.logger.exception('Reports could not be refreshed after categorisation')
         warning = 'Categories saved, but reports could not be refreshed.'
-    return jsonify(ok=True, resolved_ids=resolved, warning=warning)
+    return jsonify(ok=True, resolved_ids=[str(i) for i in resolved], warning=warning)
 
 
 @app.route("/api/resolve-exception", methods=["POST"])
 def resolve_exception():
-    """AJAX endpoint to resolve an exception — assign category/subcategory."""
+    """Only the clicked category exception; future rules have independent approval."""
     data = request.get_json()
-    exc_id = data.get("exception_id")
-    category = data.get("category", "")
-    subcategory = data.get("subcategory", "")
-    remember = data.get("remember_rule", False)
-    merchant_core = data.get("merchant_core", "")
-
-    if not exc_id or not category or not subcategory:
-        return jsonify({"ok": False, "error": "Missing required fields."})
-
+    category, subcategory = data['category'], data['subcategory']
+    if data.get('remember_rule'):
+        return jsonify(ok=False, error='Future rules require a separate preview and confirmation after saving this transaction.'), 400
+    if subcategory not in _load_cat_tree().get(category, []):
+        return jsonify(ok=False, error='Choose an existing Category / Subcategory.'), 400
+    from scripts.services.exception_review import resolve_one
     conn = _get_db()
-
     try:
-        # Ensure category + subcategory exist in DB (auto-seed from categories.json edits)
-        conn.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (category,))
-        cat_row = conn.execute(
-            "SELECT category_id FROM categories WHERE name = ?", (category,)
-        ).fetchone()
-        cat_id = cat_row["category_id"]
-        conn.execute(
-            "INSERT OR IGNORE INTO subcategories (category_id, name) VALUES (?, ?)",
-            (cat_id, subcategory),
-        )
-        sub_row = conn.execute(
-            "SELECT subcategory_id FROM subcategories WHERE category_id = ? AND name = ?",
-            (cat_id, subcategory),
-        ).fetchone()
-        subcat_id = sub_row["subcategory_id"]
-
-        # Get the exception
-        exc = conn.execute(
-            "SELECT * FROM exceptions WHERE exception_id = ?", (exc_id,)
-        ).fetchone()
-        if not exc:
-            return jsonify({"ok": False, "error": "Exception not found."})
-
-        # Update the transaction's subcategory
-        if exc["txn_id"]:
-            conn.execute(
-                "UPDATE transactions SET subcategory_id = ?, merchant_core = ? WHERE txn_id = ?",
-                (subcat_id, merchant_core, exc["txn_id"]),
-            )
-
-        # Mark exception resolved
-        conn.execute(
-            "UPDATE exceptions SET status = 'resolved', resolved_at = strftime('%Y-%m-%dT%H:%M:%S','now') "
-            "WHERE exception_id = ?",
-            (exc_id,),
-        )
-
-        # Resolve only the clicked exception. Similar merchants may need different categories,
-        # so matching rows must remain open until the user applies them explicitly.
-        bulk_resolved = []
-
-        # Remember rule — add to category_rules.csv
-        if remember and merchant_core:
-            _add_category_rule(merchant_core, category, subcategory)
-
-        conn.commit()
-        warning = None
-        try:
-            _regenerate_report()
-        except Exception:
-            app.logger.exception('Report refresh failed after exception Apply')
-            warning = 'Category saved, but reports could not be refreshed.'
-        return jsonify({"ok": True, "bulk_resolved": bulk_resolved, "warning": warning})
-
-    except Exception as e:
+        resolve_one(conn, data['exception_id'], category, subcategory)
+    except ValueError as exc:
         conn.rollback()
-        return jsonify({"ok": False, "error": str(e)})
+        return jsonify(ok=False, error=str(exc)), 409
+    except Exception:
+        conn.rollback()
+        app.logger.exception('Exception category save failed')
+        return jsonify(ok=False, error='Category save failed; no transaction was changed.'), 500
     finally:
         conn.close()
+    warning = None
+    try:
+        _regenerate_report()
+    except Exception:
+        app.logger.exception('Report refresh failed after exception Apply')
+        warning = 'Category saved, but reports could not be refreshed.'
+    return jsonify(ok=True, bulk_resolved=[], warning=warning)
 
-
-def _add_category_rule(merchant_core: str, category: str, subcategory: str):
-    """Append a new rule to category_rules.csv (if not already present)."""
-    existing = set()
-    if RULES_CSV.exists():
-        with open(RULES_CSV, encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                existing.add(row.get("merchant_core", "").strip().upper())
-
-    mc_upper = merchant_core.strip().upper()
-    if mc_upper in existing:
-        return  # already has a rule
-
-    with open(RULES_CSV, "a", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow([merchant_core, "", category, subcategory, "auto-added by dashboard"])
 
 
 @app.route("/api/update-note", methods=["POST"])
@@ -1190,7 +1139,8 @@ def api_recategorize():
     subcategory = data.get("subcategory", "")
     new_subcat_name = data.get("new_subcategory", "").strip()
     scope = data.get("scope", "single")        # 'single' | 'merchant'
-    remember_rule = data.get("remember_rule", False)
+    if data.get("remember_rule", False):
+        return jsonify(ok=False, error="Future rules require a separate preview and confirmation after saving this transaction."), 400
 
     if not txn_id or not category:
         return jsonify({"ok": False, "error": "Missing required fields."})
@@ -1294,16 +1244,16 @@ def api_recategorize():
             )
             updated_count += 1
 
-        # ── Remember rule ──
-        if remember_rule and merchant:
-            _update_category_rule(merchant, category, subcategory)
 
         conn.commit()
 
-        # ── Regenerate report ──
-        _regenerate_report()
-
-        return jsonify({"ok": True, "updated": updated_count, "merchant_core": merchant})
+        # The category commit already succeeded; refresh is a separate outcome.
+        warning = None
+        try:
+            _regenerate_report()
+        except Exception:
+            warning = 'Category saved, but report refresh failed. Reload after regenerating reports; do not repeat the category save.'
+        return jsonify({"ok": True, "updated": updated_count, "merchant_core": merchant, "warning": warning})
 
     except Exception as e:
         conn.rollback()
@@ -1312,31 +1262,6 @@ def api_recategorize():
         conn.close()
 
 
-def _update_category_rule(merchant_core: str, category: str, subcategory: str):
-    """Add or update a rule in category_rules.csv for the given merchant."""
-    rows = []
-    updated = False
-    mc_upper = merchant_core.strip().upper()
-
-    if RULES_CSV.exists():
-        with open(RULES_CSV, encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            fieldnames = reader.fieldnames
-            for row in reader:
-                if row.get("merchant_core", "").strip().upper() == mc_upper:
-                    row["category"] = category
-                    row["subcategory"] = subcategory
-                    row["notes"] = row.get("notes", "") or "updated by dashboard"
-                    updated = True
-                rows.append(row)
-
-    if updated:
-        with open(RULES_CSV, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=fieldnames)
-            w.writeheader()
-            w.writerows(rows)
-    else:
-        _add_category_rule(merchant_core, category, subcategory)
 
 
 # ── Expenditure Planning ─────────────────────────────────────
@@ -1591,6 +1516,8 @@ def _report_period_context(args):
             resolved = resolve_period_filter(PeriodFilter(kind='year', year=int(args.get('year', ''))))
         elif period == 'month':
             resolved = resolve_period_filter(PeriodFilter(kind='month', year=int(args.get('year', '')), month=int(args.get('month', ''))))
+        elif period in {'this_month', 'last_month', 'last_3_months', 'last_quarter'}:
+            resolved = resolve_period_filter(PeriodFilter(kind=period))
         elif period == 'custom':
             resolved = resolve_period_filter(PeriodFilter(kind='custom', start=args.get('start'), end=args.get('end')))
         else:
@@ -1611,6 +1538,9 @@ def _report_period_context(args):
         value = args.get(key)
         if value:
             query[key] = value
+    if period in {'this_month', 'last_month', 'last_3_months', 'last_quarter'}:
+        # Freeze the iframe to this render's inclusive dates, even across midnight.
+        query = {'period': 'custom', 'start': resolved.start, 'end': resolved.end}
     context['query'] = urlencode(query)
     return context
 
@@ -1742,6 +1672,10 @@ def report_raw(name):
     finally:
         if conn is not None:
             conn.close()
+
+
+from scripts.rule_routes import register_rules
+register_rules(app, sys.modules[__name__])
 
 
 if __name__ == "__main__":

@@ -20,16 +20,8 @@ from scripts.triage_descriptions import decompose_description
 
 def _load_rules(rules_path: Path) -> dict[str, dict]:
     """Load category_rules.csv into a dict keyed by merchant_core (uppercased)."""
-    rules: dict[str, dict] = {}
-    with open(rules_path, encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            mc = row["merchant_core"].strip().upper()
-            rules[mc] = {
-                "category": row.get("category", ""),
-                "subcategory": row.get("subcategory", ""),
-                "notes": row.get("notes", ""),
-            }
-    return rules
+    from scripts.services.category_rules import load_rules
+    return load_rules(rules_path)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

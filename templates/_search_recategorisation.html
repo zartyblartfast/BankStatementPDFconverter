@@ -2,7 +2,8 @@
   <form id="searchRecategoryForm">
     <h2 id="searchRecategoryTitle">Re-categorise transaction</h2>
     <p id="searchRecategoryTransaction" style="margin-bottom:12px;overflow-wrap:anywhere"></p>
-    <p class="muted" style="margin-bottom:12px">Only this transaction will change. No matching transactions or remembered rules will be updated.</p>
+    <p class="muted" style="margin-bottom:12px">Only this transaction is saved first. Matching historical transactions never change. Future rules need a separate preview and explicit confirmation.</p>
+    <label style="display:block;margin-bottom:12px"><input type="checkbox" id="searchRecategoryFuture"> Also use this category for future matches</label>
     <label for="searchRecategoryCategory">Category</label>
     <select id="searchRecategoryCategory" required style="display:block;width:100%;margin:6px 0 12px"></select>
     <label for="searchRecategorySubcategory">Subcategory</label>

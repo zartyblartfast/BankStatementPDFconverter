@@ -1,0 +1,10 @@
+<dialog id="rulePreview" aria-labelledby="rulePreviewTitle" data-csrf="{{ csrf_token() }}" style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:12px;padding:24px;width:min(700px,90vw);max-height:85vh;overflow:auto">
+  <h2 id="rulePreviewTitle">Confirm future rule change</h2>
+  <p id="rulePreviewSummary" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+  <p>Rules are shared: edits affect future matches across all accounts. The review account filter does not restrict this approval or its all-account evidence. Exact uppercase normalised merchant key only. Historical assignments below are evidence, not transactions to be changed. Disabling stops future matching; it does not undo history.</p>
+  <details><summary>Historical exact matches (all accounts)</summary><ul id="rulePreviewMatches" style="max-height:240px;overflow:auto"></ul></details>
+  <p id="rulePreviewStatus" role="status" aria-live="polite"></p>
+  <button id="rulePreviewCancel" type="button" class="btn">Cancel</button>
+  <button id="rulePreviewApprove" type="button" class="btn btn-primary">Confirm change</button>
+</dialog>
+<script src="{{ url_for('static', filename='rule_actions.js') }}"></script>

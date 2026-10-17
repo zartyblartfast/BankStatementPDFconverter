@@ -444,6 +444,62 @@ class IngestionTests(unittest.TestCase):
         extraction.coverage.clear()
         self.assertEqual(self.commit(preview).added,1)
 
+    def test_real_pdf_disabled_last_duplicate_suppresses_earlier_enabled_rule(self):
+        from tests.test_extraction import synthetic_pdf, LINES
+        from scripts.services.ingestion import prepare_import, preview_summary
+        from scripts.triage_descriptions import decompose_description
+        from scripts.apply_categories import _load_rules
+        self.pdf.write_bytes(synthetic_pdf([(1, 'Statement period: 01 Jan 2026 to 31 Jan 2026')] + LINES))
+        key = decompose_description('VIS SYNTHETIC SHOP').merchant_core.upper()
+        path = self.root / 'config/category_rules.csv'
+        path.write_text('merchant_core,category,subcategory,enabled\n' + key + ',Test,Valid,true\n' + key.lower() + ',Test,Valid,false\n')
+        before = path.read_bytes()
+        self.assertNotIn(key, _load_rules(path))
+        self.migrate()
+        preview = prepare_import('StatementsPDF/fixture.pdf', db_path=self.db, root=self.root, account_id='HSBC_UK')
+        self.assertEqual(preview.status, 'eligible')
+        self.assertEqual(preview_summary(preview)['counts']['categorised'], 0)
+        self.assertEqual(self.commit(preview).exceptions_created, 2)
+        with closing(sqlite3.connect(self.db)) as conn:
+            self.assertEqual(conn.execute('SELECT count(*) FROM transactions WHERE subcategory_id IS NOT NULL').fetchone()[0], 0)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_real_synthetic_pdf_import_honors_disabled_legacy_csv_rule(self):
+        from tests.test_extraction import synthetic_pdf, LINES
+        from scripts.services.ingestion import prepare_import, preview_summary
+        from scripts.triage_descriptions import decompose_description
+        from scripts.services import category_rules as rules
+        self.pdf.write_bytes(synthetic_pdf([(1,'Statement period: 01 Jan 2026 to 31 Jan 2026')]+LINES))
+        key=decompose_description('VIS SYNTHETIC SHOP').merchant_core.upper()
+        path=self.root/'config/category_rules.csv'
+        path.write_text('merchant_core,category,subcategory\n'+key+',Test,Valid\n')
+        self.migrate()
+        enabled=prepare_import('StatementsPDF/fixture.pdf',db_path=self.db,root=self.root,account_id='HSBC_UK')
+        self.assertEqual(preview_summary(enabled)['counts']['categorised'],1)
+        rules.change(path,rules.snapshot(path)['digest'],key,('Test','Valid'),False)
+        preview=prepare_import('StatementsPDF/fixture.pdf',db_path=self.db,root=self.root,account_id='HSBC_UK')
+        self.assertEqual(preview.status,'eligible')
+        self.assertEqual(preview_summary(preview)['counts']['categorised'],0)
+        self.assertEqual(self.commit(preview).exceptions_created,2)
+        with closing(sqlite3.connect(self.db)) as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM transactions WHERE subcategory_id IS NOT NULL').fetchone()[0],0)
+
+    def test_rule_maintenance_disable_reenable_is_honored_on_import_without_recategorising_history(self):
+        from scripts.services import category_rules as rules
+        path = self.root / 'config/category_rules.csv'
+        self.migrate()
+        rules.change(path, rules.snapshot(path)['digest'], 'SYNTHETIC', ('Test', 'Valid'), False)
+        from scripts.services.ingestion import preview_summary
+        self.assertEqual(preview_summary(self.prepare())['counts']['uncategorised'], 1)
+        self.assertEqual(self.commit().exceptions_created, 1)
+        rules.change(path, rules.snapshot(path)['digest'], 'SYNTHETIC', ('Test', 'Valid'), True)
+        self.pdf.write_bytes(b'synthetic replacement with new row')
+        self.commit(self.prepare(self.extraction([('2026-01-02','SYNTHETIC',-1,'1:2'),('2026-01-03','SYNTHETIC',-2,'1:3')])))
+        with closing(sqlite3.connect(self.db)) as conn:
+            assigned = conn.execute('SELECT txn_id,subcategory_id FROM transactions ORDER BY txn_id').fetchall()
+            self.assertIsNone(assigned[0][1])
+            self.assertIsNotNone(assigned[1][1])
+
     def test_missing_rules_create_one_exception_per_new_occurrence(self):
         (self.root/'config/category_rules.csv').write_text('merchant_core,category,subcategory\n')
         self.migrate()

@@ -38,3 +38,11 @@ build/
 # OS
 Thumbs.db
 .DS_Store
+
+# Private rule recovery copies and cooperating-writer artifacts
+/config/.category_rules.csv.history/
+/config/.category_rules.csv.lock
+/config/.category_rules.csv.*.tmp
+
+# Private local development plans
+/.hermes/plans/

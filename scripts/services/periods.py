@@ -54,10 +54,27 @@ def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month + 1, 1) - timedelta(days=1)
 
 
-def resolve_period_filter(period: PeriodFilter) -> ResolvedPeriod:
+def resolve_period_filter(period: PeriodFilter, *, today: date | None = None) -> ResolvedPeriod:
     """Resolve a generic period request to an inclusive date range."""
     if period.method not in {'transaction_date', 'statement_period'}:
         raise PeriodFilterError('Invalid period method')
+    if period.kind == 'this_month':
+        clock = today if today is not None else date.today()
+        return ResolvedPeriod(_iso(clock.replace(day=1)), _iso(clock), 'This month so far')
+    if period.kind in {'last_month', 'last_3_months', 'last_quarter'}:
+        clock = today if today is not None else date.today()
+        boundary = clock.replace(day=1)
+        if period.kind == 'last_quarter':
+            boundary = boundary.replace(month=((clock.month - 1) // 3) * 3 + 1)
+        months_back = 1 if period.kind == 'last_month' else 3
+        ordinal = (boundary.year - 1) * 12 + boundary.month - 1 - months_back
+        if ordinal < 0:
+            raise PeriodFilterError('Period starts before year 1')
+        end = boundary - timedelta(days=1)
+        start = date(ordinal // 12 + 1, ordinal % 12 + 1, 1)
+        label = {'last_month': 'Last month', 'last_3_months': 'Last 3 months',
+                 'last_quarter': 'Last calendar quarter'}[period.kind]
+        return ResolvedPeriod(_iso(start), _iso(end), label)
     if period.kind == 'custom':
         if not period.start or not period.end:
             raise PeriodFilterError('Custom period requires start and end')
@@ -72,7 +89,8 @@ def resolve_period_filter(period: PeriodFilter) -> ResolvedPeriod:
         return ResolvedPeriod(f'{period.year:04d}-01-01', f'{period.year:04d}-12-31',
                               f'{period.year:04d} full year', period.method)
     if period.kind == 'month':
-        if period.year is None or period.month is None or not 1 <= period.year <= 9999:
+        if (period.year is None or period.month is None or not 1 <= period.year <= 9999
+                or not 1 <= period.month <= 12):
             raise PeriodFilterError('Month period requires a year in 1..9999 and month')
         start = date(period.year, period.month, 1)
         end = _last_day_of_month(period.year, period.month)

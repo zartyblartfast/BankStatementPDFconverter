@@ -1,141 +1,109 @@
 {% extends "base.html" %}
-{% block title %}Ledger Dashboard{% endblock %}
+{% block early_head %}{% include '_period_preference.html' %}{% endblock %}
+{% block title %}Overview · Ledger Dashboard{% endblock %}
 
 {% block content %}
-<h1>Ledger Dashboard</h1>
-<p class="subtitle">Overview of your bank statement data</p>
+<h1>Overview</h1>
+<p class="subtitle">See money moving in and out of your selected accounts and period.</p>
 {% include '_movement_scope.html' %}
-<p class="muted">Transfer-adjusted cash movement excludes only explicitly confirmed own-account principal and report-hidden rows. Categories do not infer income or consumption; fees and uncategorised movements remain. This is not an account balance.</p>
 {% macro money(cents) %}{{ '-' if cents < 0 else '' }}£{{ (cents|abs)//100 }}.{{ '%02d'|format((cents|abs)%100) }}{% endmacro %}
-{% if stats.movement %}
-<section class="card"><h2>Raw movement and confirmed transfers</h2>
-  <p>Raw credits: {{ money(stats.movement.raw.credits_pence) }} · Raw debits: {{ money(stats.movement.raw.debits_pence) }} · Raw net cash movement: {{ money(stats.movement.raw.net_pence) }}</p>
-  <p>Confirmed transfer in: {{ money(stats.movement.transfers.in_pence) }} ({{ stats.movement.transfers.in_count }}) · Confirmed transfer out: {{ money(stats.movement.transfers.out_pence) }} ({{ stats.movement.transfers.out_count }}) · Unmatched legs: {{ stats.movement.transfers.unmatched_count }}</p>
-  <p class="muted">Raw includes report-hidden rows. Principal is removed even when its counterpart is outside this scope or posts on another date.</p>
-  {% if stats.movement.warnings %}<ul>{% for warning in stats.movement.warnings %}<li>{{ warning|replace('_',' ') }}</li>{% endfor %}</ul>{% endif %}
-</section>
-{% endif %}
-
-<div class="card-grid">
-  <div class="stat-card">
-    <div class="value green">{{ stats.total_txns }}</div>
-    <div class="label">Total Transactions</div>
-  </div>
-  <div class="stat-card">
-    <div class="value">{{ stats.statements }}</div>
-    <div class="label">Statements Imported</div>
-  </div>
-  <div class="stat-card">
-    <div class="value muted">{{ stats.statement_range }}</div>
-    <div class="label">Statement Range</div>
-  </div>
-  <div class="stat-card">
-    {% if stats.open_exceptions > 0 %}
-      <div class="value amber">⚠ {{ stats.open_exceptions }}</div>
-    {% else %}
-      <div class="value green">✓ 0</div>
-    {% endif %}
-    <div class="label">Open Exceptions (all accounts)</div>
-  </div>
-</div>
-
 <div class="card-grid">
   <div class="stat-card">
     <div class="value green">£{{ stats.total_income }}</div>
-    <div class="label">Transfer-adjusted credits</div>
+    <div class="label">Money in</div>
   </div>
   <div class="stat-card">
     <div class="value red">£{{ stats.total_expense }}</div>
-    <div class="label">Transfer-adjusted debits</div>
+    <div class="label">Money out</div>
   </div>
   <div class="stat-card">
     <div class="value {{ 'green' if stats.net_raw >= 0 else 'red' }}">{% if stats.net.startswith('+') or stats.net.startswith('-') %}{{ stats.net[0] }}£{{ stats.net[1:] }}{% else %}£{{ stats.net }}{% endif %}</div>
-    <div class="label">Net cash movement</div>
-  </div>
-  <div class="stat-card">
-    <div class="value muted">{{ stats.last_import }}</div>
-    <div class="label">Last Import (all accounts)</div>
+    <div class="label">Net money movement</div>
   </div>
 </div>
-
-<div class="card-grid">
-  <div class="stat-card">
-    <div class="value {{ 'green' if stats.coverage_status == 'complete' else 'amber' if stats.coverage_status == 'partial' else 'muted' }}">
-      {{ stats.coverage_complete_months }}
-    </div>
-    <div class="label">Coverage</div>
-    <div class="muted" style="font-size:0.78rem; margin-top:6px;">{{ stats.coverage_summary }}</div>
-    <div class="muted" style="font-size:0.72rem; margin-top:2px;">{{ stats.coverage_range }}</div>
-  </div>
-  <div class="stat-card">
-    {% if stats.uncategorised > 0 %}
-      <div class="value amber">⚠ {{ stats.uncategorised }}</div>
-    {% else %}
-      <div class="value green">✓ 0</div>
-    {% endif %}
-    <div class="label">Categorisation</div>
-    <div class="muted" style="font-size:0.78rem; margin-top:6px;">{{ stats.categorisation_summary }}</div>
-  </div>
-</div>
-
-{% if stats.coverage_by_account %}
-<div class="card"><h2>Coverage by account</h2>
-  {% for coverage in stats.coverage_by_account %}
-  <p><strong>{{ coverage.account_id }}</strong> · {{ coverage.complete_months|length }} complete verified months</p>
-  {% if coverage.warnings %}<ul>{% for warning in coverage.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
-  {% endfor %}
-  <p class="muted">All-account averages use only complete calendar months independently covered for every selected account. No opening date is inferred.</p>
-</div>
-{% endif %}
+<p class="subtitle">Excludes explicitly confirmed own-account transfers (principal only) and hidden report rows. This is not an account balance, and these are not inferred income or spending. Fees and uncategorised movements remain included.</p>
+{% if stats.total_txns == 0 %}<p class="alert alert-info">No transactions in the selected account/period. Zero movement does not establish complete statement coverage.</p>{% endif %}
 
 <div class="card">
   <h2>Complete-month average</h2>
+  {% if stats.average_available %}
   <div class="card-grid" style="margin-bottom:12px;">
     <div class="stat-card">
       <div class="value green">£{{ stats.average_income }}</div>
-      <div class="label">Average adjusted credits</div>
+      <div class="label">Average money in</div>
     </div>
     <div class="stat-card">
       <div class="value red">£{{ stats.average_expense }}</div>
-      <div class="label">Average adjusted debits</div>
+      <div class="label">Average money out</div>
     </div>
     <div class="stat-card">
       <div class="value {{ 'green' if stats.average_net_raw >= 0 else 'red' }}">
         {% if stats.average_net == '—' %}£—{% elif stats.average_net.startswith('+') %}+£{{ stats.average_net[1:] }}{% elif stats.average_net.startswith('-') %}-£{{ stats.average_net[1:] }}{% else %}£{{ stats.average_net }}{% endif %}
       </div>
-      <div class="label">Average net cash flow</div>
+      <div class="label">Average net money movement</div>
     </div>
   </div>
   <div class="muted" style="font-size:0.82rem;">{{ stats.average_summary }}</div>
-  {% if stats.average_warnings %}
-  <ul class="muted" style="font-size:0.78rem; margin:6px 0 0 18px;">
-    {% for warning in stats.average_warnings %}
-    <li>{{ warning }}</li>
-    {% endfor %}
-  </ul>
+  {% else %}
+  <p class="muted"><strong>Unavailable</strong> · No complete calendar months with verified statement evidence for every selected account in this period.</p>
   {% endif %}
 </div>
 
-{% if stats.open_exceptions > 0 %}
-<div class="alert alert-info">
-  You have <strong>{{ stats.open_exceptions }}</strong> exception{{ 's' if stats.open_exceptions != 1 else '' }}
-  that need{{ '' if stats.open_exceptions != 1 else 's' }} attention.
-  <a href="/exceptions" style="color:#60a5fa;">Review exceptions →</a>
-</div>
+<section class="card" aria-labelledby="attention-heading">
+  <h2 id="attention-heading">Needs attention</h2>
+  <p><a href="/exceptions" class="btn btn-primary btn-sm">Needs categorising</a> · {{ stats.open_exceptions }} open exception{{ 's' if stats.open_exceptions != 1 else '' }} (all accounts and dates).</p>
+  {% if stats.uncategorised > 0 %}
+  <p>{{ stats.categorisation_summary }} in the selected account/period.</p>
+  {% else %}<p>No uncategorised rows in the selected account/period.</p>{% endif %}
+  <p class="muted">Coverage: {{ stats.coverage_summary }} · {{ stats.coverage_range }}</p>
+  {% if stats.coverage_status != 'complete' %}<p class="amber">Coverage is incomplete or unavailable; these figures may not represent the whole period.</p>{% endif %}
+</section>
+{% set account_warnings = namespace(any=false) %}
+{% for coverage in stats.coverage_by_account|default([]) %}{% if coverage.warnings %}{% set account_warnings.any = true %}{% endif %}{% endfor %}
+{% if stats.average_warnings or (stats.movement and stats.movement.warnings) or account_warnings.any %}
+<p class="alert alert-info">Interpretation warnings apply: consult Calculation details before relying on these figures.</p>
 {% endif %}
 
-<div class="card">
-  <h2>Quick Actions</h2>
-  <div style="display:flex; gap:12px; margin-top:12px;">
-    <a href="/ingest" class="btn btn-primary">Ingest New PDF</a>
-    <a href="/report" class="btn btn-success">View Report</a>
-    <a href="/exceptions" class="btn btn-primary">Review Exceptions</a>
-  </div>
+<div class="card quick-actions" aria-label="Quick actions">
+  <a href="/ingest" class="btn btn-primary">Import statements</a>
+  <a href="/report" class="btn btn-success">View reports</a>
+  <a href="/exceptions" class="btn btn-primary">Needs categorising</a>
 </div>
 
+<details class="card">
+  <summary>Calculation details</summary>
+  <p class="muted">Money in = Transfer-adjusted credits; Money out = transfer-adjusted debits; Net money movement = Net cash movement. Categories do not infer income or consumption.</p>
+  {% if stats.movement %}
+  <h2>Raw movement and confirmed transfers</h2>
+  <p>Raw credits: {{ money(stats.movement.raw.credits_pence) }} · Raw debits: {{ money(stats.movement.raw.debits_pence) }} · Raw net cash movement: {{ money(stats.movement.raw.net_pence) }}</p>
+  <p>Confirmed transfer in: {{ money(stats.movement.transfers.in_pence) }} ({{ stats.movement.transfers.in_count }}) · Confirmed transfer out: {{ money(stats.movement.transfers.out_pence) }} ({{ stats.movement.transfers.out_count }}) · Unmatched legs: {{ stats.movement.transfers.unmatched_count }}</p>
+  <p class="muted">Raw includes report-hidden rows. Principal is removed even when its counterpart is outside this scope or posts on another date.</p>
+  {% if stats.movement.warnings %}<ul>{% for warning in stats.movement.warnings %}<li>{{ warning|replace('_',' ') }}</li>{% endfor %}</ul>{% endif %}
+  {% endif %}
+  <h2>Coverage and averages</h2>
+  <p class="muted">Averages use only complete calendar months independently covered for every selected account. Partial or missing months are not treated as zero. No opening date is inferred.</p>
+  <p>{{ stats.coverage_complete_months }} complete months · {{ stats.coverage_summary }} · {{ stats.coverage_range }}</p>
+  {% if stats.average_warnings %}<ul>{% for warning in stats.average_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
+  {% if stats.coverage_by_account %}
+  <h2>Coverage by account</h2>
+  {% for coverage in stats.coverage_by_account %}
+  <p><strong>{{ coverage.account_id }}</strong> · {{ coverage.complete_months|length }} complete verified months</p>
+  {% if coverage.warnings %}<ul>{% for warning in coverage.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
+  {% endfor %}
+  {% endif %}
+</details>
+
+<details class="card">
+<summary>Import activity &amp; counts</summary>
+<dl>
+  <dt>Transactions (selected account/period)</dt><dd>{{ stats.total_txns }}</dd>
+  <dt>Statements represented (selected account/period)</dt><dd>{{ stats.statements }}</dd>
+  <dt>Statement range (all accounts; not period filtered; unavailable for one account)</dt><dd>{{ stats.statement_range }}</dd>
+  <dt>Last import (all accounts)</dt><dd>{{ stats.last_import }}</dd>
+</dl>
+<h2>Import history (all accounts)</h2>
 {% if recent_imports %}
-<div class="card">
-  <h2>Import History (all accounts)</h2>
+<div style="overflow-x:auto;">
   <table>
     <thead><tr><th>Source File</th><th class="right">Transactions</th><th>Imported At</th></tr></thead>
     <tbody>
@@ -149,5 +117,6 @@
     </tbody>
   </table>
 </div>
-{% endif %}
+{% else %}<p class="muted">No imports recorded.</p>{% endif %}
+</details>
 {% endblock %}

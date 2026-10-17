@@ -45,7 +45,10 @@ def verify_backup(backup_path: str | Path) -> dict:
                 or not isinstance(manifest.get('files'), dict)):
             raise ValueError('Invalid backup manifest')
         timestamp = datetime.fromisoformat(manifest['created_at'])
-        if timestamp.tzinfo is None or not required <= set(manifest['files']) <= allowed:
+        inventory = set(manifest['files'])
+        history_members = {name for name in inventory if re.fullmatch(
+            r'config/\.category_rules\.csv\.history/(?:[0-9a-f]{32}\.json|state)', name)}
+        if timestamp.tzinfo is None or not required <= inventory or not inventory <= allowed | history_members:
             raise ValueError('Invalid backup manifest')
         for checksum in manifest['files'].values():
             if not isinstance(checksum, str) or not re.fullmatch('[0-9a-f]{64}', checksum):
@@ -69,6 +72,9 @@ def verify_backup(backup_path: str | Path) -> dict:
         path = backup / relative
         if not path.is_file() or _sha256(path) != checksum:
             raise ValueError('Backup checksum mismatch')
+    if history_members:
+        from scripts.services import category_rules
+        category_rules.history(backup / 'config/category_rules.csv')
     _check_database(backup / 'finance' / 'ledger.db', immutable=True)
     return manifest
 
@@ -119,6 +125,41 @@ def restore_backup(backup_path: str | Path, destination: str | Path, *,
             shutil.rmtree(staging)
 
 
+def _rule_inventory(path):
+    """Bounded recovery inventory, excluding transient atomic-write staging."""
+    from scripts.services import category_rules
+    directory = path.with_name('.' + path.name + '.history')
+    if _is_snapshot_link(path) or _is_snapshot_link(directory):
+        raise ValueError('Rule snapshot link or reparse point refused')
+    members = []
+    if directory.exists():
+        for member in directory.iterdir():
+            if _is_snapshot_link(member):
+                raise ValueError('Rule history link or reparse point refused')
+            if re.fullmatch(r'\.(?:[0-9a-f]{32}\.json|state)\.[0-9a-f]{32}\.tmp', member.name) and member.is_file():
+                continue
+            if not re.fullmatch(r'(?:[0-9a-f]{32}\.json|state)', member.name) or not member.is_file():
+                raise ValueError('Invalid rule history inventory')
+            members.append(member)
+        category_rules.history(path)
+    return {member: _sha256(member) for member in [path, *members]}
+
+
+def _consistent_rule_copy(path, config_destination):
+    from scripts.services import category_rules
+    with category_rules._write_lock(path):
+        before = _rule_inventory(path)
+        for source in before:
+            relative = source.relative_to(path.parent)
+            target = config_destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+        if before != _rule_inventory(path) or any(
+                _sha256(config_destination / source.relative_to(path.parent)) != digest
+                for source, digest in before.items()):
+            raise ValueError('Rules or history changed during snapshot')
+
+
 def create_backup(*, root: str | Path | None = None,
                   db_path: str | Path | None = None,
                   backup_dir: str | Path | None = None,
@@ -150,7 +191,8 @@ def create_backup(*, root: str | Path | None = None,
             with closing(sqlite3.connect(ledger)) as dest:
                 src.backup(dest)
         (staging / 'config').mkdir()
-        for config in (settings.categories_path, settings.category_rules_path, settings.merchant_rules_path):
+        _consistent_rule_copy(settings.category_rules_path, staging / 'config')
+        for config in (settings.categories_path, settings.merchant_rules_path):
             if config == settings.merchant_rules_path and not config.exists():
                 continue
             shutil.copyfile(config, staging / 'config' / config.name)

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block early_head %}{% include '_period_preference.html' %}{% endblock %}
 {% block title %}Report — Ledger Dashboard{% endblock %}
 
 {% block extra_css %}
@@ -21,6 +22,7 @@
 {% endblock %}
 
 {% block content %}
+<noscript><style>[data-period-fields][hidden] { display:inline !important; }</style></noscript>
 <form class="report-bar" method="get" action="/report">
   <label for="reportSelect">Report:</label>
   <select id="reportSelect" name="name">
@@ -39,6 +41,9 @@
 
   <label for="periodSelect">Period:</label>
   <select id="periodSelect" name="period">
+    {% for key, label in [('this_month','This month so far'),('last_month','Last month'),('last_3_months','Last 3 months'),('last_quarter','Last calendar quarter')] %}
+    <option value="{{ key }}" {% if period.kind == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
     <option value="all" {% if period.kind == 'all' %}selected{% endif %}>All dates</option>
     <option value="year" {% if period.kind == 'year' %}selected{% endif %}>Full year</option>
     <option value="month" {% if period.kind == 'month' %}selected{% endif %}>Calendar month</option>
@@ -100,6 +105,7 @@ function updatePeriodFields() {
   document.querySelectorAll('[data-period-fields]').forEach(el => {
     const fields = el.dataset.periodFields.split(' ');
     el.hidden = !fields.includes(kind);
+    el.querySelectorAll('select, input').forEach(field => { field.disabled = el.hidden; });
   });
 }
 document.getElementById('periodSelect').addEventListener('change', updatePeriodFields);

@@ -23,7 +23,7 @@ from typing import Optional
 
 # FX conversion tail: "USD 12.00 @ 1.3289 Visa Rate" or similar
 _FX_TAIL_RE = re.compile(
-    r"\s+[A-Z]{3}\s+[\d,.]+\.\d{2}\s+@\s+.*$",
+    r"\s+[A-Z]{3}\s+[\d,.]+\.\d{2}\s+@\s*.*$",
     re.IGNORECASE,
 )
 

@@ -109,6 +109,25 @@ LedgerClassicReport.mount(ALL_TXNS, ALL_MONTHS, REPORT_POLICY, REPORT_KIND);
 </script></body></html>'''
 
 
+def _dashboard_report_html(html):
+    """The dashboard calendar owns scope; retain renderer inputs, not a second UI.
+
+    display:none also removes the internal selects from keyboard navigation.
+    Keep Show excluded (and its existing listeners) visible; date-only legacy
+    bars collapse instead of leaving a padded empty strip. Standalone callers
+    of the builders/localizer deliberately do not pass through this adapter.
+    """
+    if 'data-dashboard-period-filtered=' not in html:
+        controls = ('<style data-dashboard-period-filtered="true">'
+            '#fromMonth,#toMonth,.date-bar label[for="fromMonth"],'
+            '.date-bar label[for="toMonth"],.date-bar .separator,#subtitle'
+            '{display:none!important;}'
+            '.date-bar:not(:has(#showExcluded)){display:none!important;}'
+            '</style>')
+        html = html.replace('</head>', controls+'</head>', 1) if '</head>' in html else controls+html
+    return localize_report_html(html)
+
+
 def serve_report_html(html, *, conn, account_ids, period, name, legacy_all_accounts=False):
     """Serve current policy data in memory; never rewrite a stored report.
 
@@ -133,7 +152,7 @@ def serve_report_html(html, *, conn, account_ids, period, name, legacy_all_accou
         if 'data-movement-policy="confirmed-v1"' in html:
             rows, months = query_report(conn=connection,account_ids=account_ids,
                 start=str(period.get('start') or ''),end=str(period.get('end') or ''))
-            return localize_report_html(build_policy_report(rows,months,name))
+            return _dashboard_report_html(build_policy_report(rows,months,name))
     # Legacy data has no verifiable transfer snapshot. Filter existing raw data
     # only; no timestamp can make it policy-aware. Missing account IDs never match.
     match = re.search(r'const\s+ALL_TXNS\s*=\s*',html)
@@ -158,10 +177,7 @@ def serve_report_html(html, *, conn, account_ids, period, name, legacy_all_accou
                 _,end = json.JSONDecoder().raw_decode(html,months_match.end())
                 months = sorted({r.get('statement_date') for r in rows if r.get('statement_date')})
                 html = html[:months_match.end()]+script_json(months)+html[end:]
-    if (period.get('start') or period.get('end')) and 'data-dashboard-period-filtered=' not in html:
-        controls = '<style data-dashboard-period-filtered="true">.date-bar,#subtitle{display:none!important;}</style>'
-        html = html.replace('</head>', controls+'</head>', 1) if '</head>' in html else controls+html
-    return localize_report_html(html)
+    return _dashboard_report_html(html)
 
 
 def standalone_report_html(html: str) -> str:
@@ -181,14 +197,16 @@ def standalone_report_html(html: str) -> str:
 
 
 def localize_report_html(html: str) -> str:
+    from scripts.legacy_rule_correction import adapt_controls, adapt_script as adapt_correction_script
     html, protected = _protect_report_data(html)
+    html = adapt_controls(html)
 
     def adapt_script(match):
         if match.group() == LEGACY_CHART_TAG:
             return CHART_TAG
         if re.search(r'\bsrc\s*=', match.group(1), re.IGNORECASE):
             return match.group()
-        return match.group(1) + _adapt_code(match.group(2)) + match.group(3)
+        return match.group(1) + _adapt_code(adapt_correction_script(match.group(2))) + match.group(3)
 
     html = _SCRIPT.sub(adapt_script, html)
     if 'data-movement-policy="confirmed-v1"' not in html and 'data-legacy-policy-warning' not in html:

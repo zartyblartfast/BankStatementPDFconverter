@@ -124,6 +124,10 @@
 </div>
 {% endif %}
 
+{% if commit_result or (result and not result.error) %}
+<p class="alert alert-info"><a href="/exceptions">Review categories and future rules →</a> Missing-rule and saved-category disagreement candidates are available in Exceptions. No automatic changes are made.</p>
+{% endif %}
+
 {% if commit_result %}
 <div class="card">
   <h2>Import Committed</h2>

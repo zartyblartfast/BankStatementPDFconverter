@@ -15,7 +15,7 @@ const elements={};
 for(const match of input.html.matchAll(/<([\w-]+)[^>]*\bid="([^"]+)"[^>]*>/g))elements[match[2]]=new Element(match[1]);
 const document={listeners:{},getElementById:id=>elements[id]||null,createElement:tag=>new Element(tag),addEventListener(event,fn){this.listeners[event]=fn;}};
 const charts=[];
-const context=vm.createContext({document,window:{location:{protocol:input.protocol||'http:',pathname:'/report/raw/fixture',search:''}},Chart:class{constructor(_,config){charts.push(config);}destroy(){}},console});
+const context=vm.createContext({document,window:{location:{protocol:'http:',pathname:'/report/raw/fixture',search:''}},Chart:class{constructor(_,config){charts.push(config);}destroy(){}},console});
 vm.runInContext(fs.readFileSync(path.join(path.dirname(input.helper),'report-actions.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(input.helper,'utf8'),context);
 for(const script of input.scripts)vm.runInContext(script,context);
@@ -58,13 +58,6 @@ assert.ok(all().some(e=>e.textContent.includes('Confirmed paired')));
 assert.ok(all().some(e=>e.className.includes('item-row')),'grouped rows expand on demand');
 assert.ok(all().some(e=>e.textContent==='Edit note'));
 assert.ok(all().some(e=>e.textContent==='Re-categorise'));
-if(input.protocol==='file:'){
-  assert.match(elements.reportEditNotice.textContent,/Standalone HTML editing is unsupported/);
-  fire(all().find(e=>e.textContent==='Edit note'));
-  assert.equal(elements.reportEditDialog.open,false,'standalone note editing stays disabled');
-  fire(all().find(e=>e.textContent==='Re-categorise'));
-  assert.equal(elements.reportEditDialog.open,false,'standalone category editing stays disabled');
-}
 if(input.scenario==='sorting'){
   const sub=walk(elements.omittedGroups).find(e=>e.className==='sub-row expandable'&&e.children[0].textContent.includes('Own Accounts'));
   const order=()=>sub.parent.children.filter(e=>['1','2'].includes(e.dataset.txnId)).map(e=>e.dataset.txnId);

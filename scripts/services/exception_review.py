@@ -26,6 +26,29 @@ def review_groups(conn, exceptions):
     return [groups[key] for key in sorted(groups)]
 
 
+def resolve_one(conn, exception_id, category, subcategory):
+    """Audit one clicked category exception; never replace identity or teach rules."""
+    conn.execute('BEGIN IMMEDIATE')
+    row = conn.execute('''SELECT e.status,e.type,e.txn_id,t.subcategory_id,t.merchant_core,
+        c.name AS category,s.name AS subcategory FROM exceptions e JOIN transactions t ON e.txn_id=t.txn_id
+        LEFT JOIN subcategories s ON t.subcategory_id=s.subcategory_id
+        LEFT JOIN categories c ON s.category_id=c.category_id WHERE e.exception_id=?''', (exception_id,)).fetchone()
+    if row is None or row['status'] != 'open' or row['type'] not in ('uncategorised', 'unknown_subcategory'):
+        raise ValueError('This category exception changed or was resolved. Reload before applying.')
+    conn.execute('INSERT OR IGNORE INTO categories(name) VALUES (?)', (category,))
+    cid = conn.execute('SELECT category_id FROM categories WHERE name=?', (category,)).fetchone()[0]
+    conn.execute('INSERT OR IGNORE INTO subcategories(category_id,name) VALUES (?,?)', (cid, subcategory))
+    sid = conn.execute('SELECT subcategory_id FROM subcategories WHERE category_id=? AND name=?', (cid, subcategory)).fetchone()[0]
+    if row['subcategory_id'] != sid:
+        old_label = f"{row['category']} / {row['subcategory']}" if row['category'] else 'Uncategorised'
+        conn.execute('UPDATE transactions SET subcategory_id=? WHERE txn_id=?', (sid, row['txn_id']))
+        conn.execute('''INSERT INTO edit_log(txn_id,field_changed,old_value,new_value,old_category,new_category,merchant_core,scope)
+            VALUES (?,'subcategory_id',?,?,?,?,?,'single')''',
+            (row['txn_id'], str(row['subcategory_id']), str(sid), old_label, f'{category} / {subcategory}', row['merchant_core']))
+    conn.execute("UPDATE exceptions SET status='resolved',resolved_at=strftime('%Y-%m-%dT%H:%M:%S','now') WHERE exception_id=?", (exception_id,))
+    conn.commit()
+
+
 def resolve_selected(conn, ids, category, subcategory):
     """Atomically resolve only approved open uncategorised rows; reject stale lists."""
     conn.execute('BEGIN IMMEDIATE')

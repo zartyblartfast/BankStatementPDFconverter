@@ -22,6 +22,7 @@
     const row=button.closest('tr');
     document.getElementById('searchRecategoryTransaction').textContent=
       `${row.querySelector('.search-date').textContent} · ${row.querySelector('.search-description').textContent} · ${row.querySelector('.search-amount').textContent} · Current: ${row.querySelector('.search-category').textContent}`;
+    document.getElementById('searchRecategoryFuture').checked=false;
     populateCategories(button.dataset.category);populateSubs(button.dataset.subcategory);
     dialog.showModal();
   }));
@@ -35,15 +36,25 @@
   form.addEventListener('submit',async event=>{
     event.preventDefault();
     if(saving || !target || !category.value || !subcategory.value)return;
+    const destination={category:category.value,subcategory:subcategory.value};
+    const future=document.getElementById('searchRecategoryFuture').checked;
     saving=true;save.disabled=true;status.textContent='Saving this transaction…';
     try {
       const response=await fetch('/api/search-recategorize',{
         method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':document.getElementById('manageCategories').dataset.csrf},
-        body:JSON.stringify({txn_id:Number(target.dataset.txn),old_subcategory_id:target.dataset.oldSubcategory?Number(target.dataset.oldSubcategory):null,category:category.value,subcategory:subcategory.value})
+        body:window.ruleActions.encode(destination,{txn_id:target.dataset.txn,old_subcategory_id:target.dataset.oldSubcategory||null})
       });
       const data=await response.json();
       if(!response.ok || !data.ok)throw new Error(data.error || 'Save failed.');
       if(data.warning)alert(data.warning);
+      if(future) {
+        status.textContent='Category saved. Review the separate future rule proposal.';
+        try {
+          const rule=await window.ruleActions.preview(destination,{txn_id:target.dataset.txn});
+          if(rule.unknown)alert('Category saved. Future rule outcome unknown: '+rule.error);
+          else if(rule.cancelled&&!rule.noop)alert('Category saved. Future rule was not changed.');
+        } catch(error) {alert('Category saved. Future rule was not saved: '+error.message);}
+      }
       // Reload this exact URL: all submitted search filters and page remain intact.
       window.location.reload();
     } catch(error) {

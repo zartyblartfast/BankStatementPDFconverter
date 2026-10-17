@@ -28,6 +28,8 @@ class SearchRecategorisationTests(DashboardFixture):
         self.assertIn('Manage categories',html)
         self.assertIn('Re-categorise',html)
         self.assertIn('Only this transaction',html)
+        self.assertIn('id="searchRecategoryFuture"',html)
+        self.assertIn('Also use this category for future matches',html)
         self.assertIn('data-old-subcategory="1"',html)
 
     def test_actual_controller_context_matches_rendered_account_column_rows(self):

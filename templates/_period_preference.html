@@ -1,0 +1,3 @@
+{# Only accepted date-filter metadata, never ledger/account/report data. #}
+<script id="period-preference" type="application/json">{{ {'kind': period.kind|default('all'), 'year': period.year|default(''), 'month': period.month|default(''), 'start': period.start|default(''), 'end': period.end|default(''), 'error': period.error|default(none)}|tojson }}</script>
+<script src="{{ url_for('static', filename='period_preferences.js') }}"></script>

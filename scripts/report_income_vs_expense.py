@@ -54,6 +54,7 @@ def _build_html(txns: list[dict], all_months: list[str]) -> str:
 
 def _build_legacy_html(txns: list[dict], all_months: list[str]) -> str:
     """Build the fully-interactive HTML report."""
+    from scripts.legacy_rule_correction import SAVE_SCRIPT, FUTURE_RULE_LINK
     txns_json = script_json(txns)
     months_json = script_json(all_months)
 
@@ -647,9 +648,9 @@ render();
     <input type="text" id="rcNewSub" style="display:none" placeholder="e.g. Car Insurance">
     <div class="scope-row">
       <label class="scope-opt"><input type="radio" name="rcScope" value="single" checked> This transaction only</label>
-      <label class="scope-opt"><input type="radio" name="rcScope" value="merchant"> All <strong id="rcMerchantCount"></strong> matching</label>
+
     </div>
-    <label class="remember-row"><input type="checkbox" id="rcRemember" checked> Remember rule for future imports</label>
+    {FUTURE_RULE_LINK}
     <div id="rcStatus"></div>
     <div class="modal-actions">
       <button class="btn-cancel" id="rcCancel">Cancel</button>
@@ -715,9 +716,8 @@ async function openRecatModal(txnId, merchant, curCat, curSub) {{
   document.getElementById('rcSave').disabled = false;
   document.getElementById('rcNewSub').value = '';
 
-  // Count matching merchant transactions
-  const matchCount = ALL_TXNS.filter(t => t.merchant === merchant).length;
-  document.getElementById('rcMerchantCount').textContent = matchCount + ' ' + esc(merchant);
+
+
 
   const data = await loadCatTree();
   populateCatSelect(data.tree, curCat);
@@ -735,50 +735,7 @@ function closeRecatModal() {{
   document.getElementById('recatOverlay').classList.remove('active');
 }}
 
-async function saveRecat() {{
-  const btn = document.getElementById('rcSave');
-  btn.disabled = true;
-  const statusEl = document.getElementById('rcStatus');
-  statusEl.innerHTML = '';
-
-  const cat = document.getElementById('rcCatSel').value;
-  const subSel = document.getElementById('rcSubSel').value;
-  const newSub = document.getElementById('rcNewSub').value.trim();
-  const scope = document.querySelector('input[name="rcScope"]:checked').value;
-  const remember = document.getElementById('rcRemember').checked;
-
-  const body = {{
-    txn_id: _rcTxnId,
-    category: cat,
-    subcategory: subSel === '__new__' ? '' : subSel,
-    new_subcategory: subSel === '__new__' ? newSub : '',
-    scope: scope,
-    remember_rule: remember
-  }};
-
-  try {{
-    const r = await ledgerFetch('/api/recategorize', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify(body)
-    }});
-    const data = await r.json();
-    if (data.ok) {{
-      statusEl.innerHTML = `<div class="status-msg status-ok">Updated ${{data.updated}} transaction(s). Reloading…</div>`;
-      // Reload the report after a short delay
-      setTimeout(() => {{
-        closeRecatModal();
-        window.location.reload();
-      }}, 800);
-    }} else {{
-      statusEl.innerHTML = `<div class="status-msg status-err">${{esc(data.error)}}</div>`;
-      btn.disabled = false;
-    }}
-  }} catch(e) {{
-    statusEl.innerHTML = `<div class="status-msg status-err">Network error: ${{esc(e.message)}}</div>`;
-    btn.disabled = false;
-  }}
-}}
+{SAVE_SCRIPT}
 
 // Wire up modal buttons
 document.getElementById('rcCancel').addEventListener('click', closeRecatModal);

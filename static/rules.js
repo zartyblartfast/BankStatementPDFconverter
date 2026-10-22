@@ -7,11 +7,11 @@
   const category=document.getElementById('ruleEditCategory'),sub=document.getElementById('ruleEditSubcategory');
   const mode=document.getElementById('ruleEditMode'),state=document.getElementById('ruleEditState');
   const editStatus=document.getElementById('ruleEditStatus'),save=document.getElementById('ruleEditSave');
-  let editing=null,opener=null;
-  const validPair=(cat,child)=>Object.hasOwn(CAT_TREE,cat)&&CAT_TREE[cat].includes(child);
+  let editing=null,opener=null,suggestionRevision=null,definitions=CAT_TREE,saved=false;
+  const validPair=(cat,child)=>Object.hasOwn(definitions,cat)&&definitions[cat].includes(child);
   function populate(value='') {
     sub.replaceChildren(new Option('— Select —',''));
-    (Object.hasOwn(CAT_TREE,category.value)?CAT_TREE[category.value]:[]).forEach(name=>sub.add(new Option(name,name)));
+    (Object.hasOwn(definitions,category.value)?definitions[category.value]:[]).forEach(name=>sub.add(new Option(name,name)));
     sub.value=value;sub.disabled=!category.value;
   }
   function showMode() {
@@ -26,7 +26,7 @@
   category.addEventListener('change',()=>populate());mode.addEventListener('change',showMode);
   document.getElementById('ruleEditCancel').addEventListener('click',()=>{if(!busy)edit.close();});
   edit.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
-  edit.addEventListener('close',()=>{status.textContent='Changes not saved.';editing=null;if(opener)opener.focus();});
+  edit.addEventListener('close',()=>{if(!saved)status.textContent='Changes not saved.';editing=null;if(opener&&opener.isConnected!==false)opener.focus();else status.focus();});
   save.addEventListener('click',()=>{
     if(!editing||busy)return;
     const row=editing,stateOnly=mode.value==='state';
@@ -35,19 +35,44 @@
     if((!stateOnly||enabled)&&!validPair(cat,child)){
       editStatus.textContent=stateOnly?'Choose and save a valid category / subcategory before enabling this rule.':'Choose an existing category / subcategory.';return;
     }
-    return action({key:row.dataset.key,category:cat,subcategory:child,enabled},true);
+    const payload={key:row.dataset.key,category:cat,subcategory:child,enabled};
+    if(suggestionRevision)payload.suggestion_revision=suggestionRevision;
+    return action(payload,true);
   });
   async function action(payload,fromEdit=false) {
     if(busy)return;
     busy=true;save.disabled=true;status.textContent='';editStatus.textContent='';
     try {
       const result=await window.ruleActions.preview(payload);
-      if(result.saved)window.location.reload();
+      if(result.saved){
+        saved=true;
+        if(fromEdit)edit.close();
+        status.textContent=(payload.key?'Rule saved for '+payload.key+'.':'Rule change saved.')+' Only future matching changes; saved transactions are unchanged.';
+        if(inspect){
+          try{
+            const response=await fetch(window.location.href);
+            if(!response.ok)throw new Error('Refresh failed');
+            const fresh=new DOMParser().parseFromString(await response.text(),'text/html');
+            for(const id of ['savedRules','ruleSuggestions'])document.getElementById(id)?.remove();
+            for(const id of ['savedRules','ruleSuggestions']){const section=fresh.getElementById(id);if(section)status.before(section);}
+            bindRows();
+            sorting('#rulesTable [data-sort]',document.getElementById('rulesBody'));
+            sorting('#suggestionsTable [data-sort]',document.getElementById('suggestionsBody'));
+          }catch(error){status.textContent+=' Refresh this page to see the updated list.';}
+        }else{
+          const row=Array.from(document.querySelectorAll('.rule-row')).find(item=>item.dataset.key===payload.key);
+          row?.remove();
+          const remaining=document.querySelectorAll('.rule-row').length;
+          document.getElementById('rulesReviewTitle').textContent='Optional rule review ('+remaining+')';
+          if(!remaining){document.getElementById('exceptionRulesTable').hidden=true;document.getElementById('rulesAllDone').hidden=false;}
+        }
+        status.focus();
+      }
       else if(result.unknown)status.textContent='Rule outcome unknown. Reload before another action. '+result.error;
       else {status.textContent=result.noop?'No rule change needed.':'Changes not saved.';if(fromEdit)editStatus.textContent=status.textContent;}
       if(!result.unknown)busy=false;
     } catch(error) {status.textContent=error.message;if(fromEdit)editStatus.textContent=error.message;busy=false;}
-    finally {save.disabled=busy;if(fromEdit&&!busy)save.focus();}
+    finally {save.disabled=busy;if(fromEdit&&!busy&&edit.open)save.focus();}
   }
   // Reorder existing nodes: pending dropdown values and attached actions survive.
   function sorting(selector, body) {
@@ -74,20 +99,39 @@
   sorting('#rulesTable [data-sort]',document.getElementById('rulesBody'));
   sorting('#suggestionsTable [data-sort]',document.getElementById('suggestionsBody'));
   const resetMatches=sorting('#ruleMatchesTable [data-sort]',document.getElementById('ruleInspectMatches'));
-  document.getElementById('ruleInspectClose').addEventListener('click',()=>inspect.close());
-  document.querySelectorAll('.rule-row').forEach(row=>{
-    row.querySelector('.rule-edit')?.addEventListener('click',()=>{
-      if(busy)return;
-      editing=row;opener=row.querySelector('.rule-edit');
-      document.getElementById('ruleEditTitle').textContent=row.dataset.category?'Edit rule':'Add rule';
-      document.getElementById('ruleEditKey').textContent=row.dataset.key+' · '+(row.dataset.category?`${row.dataset.category} / ${row.dataset.subcategory} (${row.dataset.enabled==='true'?'enabled':'disabled'})`:'No rule');
-      category.replaceChildren(new Option('— Select —',''));
-      Object.keys(CAT_TREE).sort().forEach(name=>category.add(new Option(name,name)));
-      category.value=Object.hasOwn(CAT_TREE,row.dataset.category)?row.dataset.category:'';
-      populate(row.dataset.subcategory);state.value=row.dataset.enabled;
-      mode.value='category';mode.disabled=!row.dataset.category;showMode();edit.showModal();
-    });
-    row.querySelector('.rule-inspect').addEventListener('click',async()=>{
+  document.getElementById('ruleInspectClose')?.addEventListener('click',()=>inspect.close());
+  async function openEdit(row) {
+    if(busy)return;
+    let suggestion=null;
+    suggestionRevision=null;definitions=CAT_TREE;
+    if(!row.dataset.category){
+      busy=true;status.textContent='Loading all-account suggestion…';
+      try {
+        const response=await fetch('/api/rules/suggestion?key='+encodeURIComponent(row.dataset.key));
+        suggestion=await response.json();
+        if(!response.ok||!suggestion.ok)throw new Error(suggestion.error||'Could not load suggestion.');
+        definitions=suggestion.categories;suggestionRevision=suggestion.suggestion_revision;
+      } catch(error) {status.textContent=error.message;return;}
+      finally {busy=false;}
+    }
+    saved=false;status.textContent='';editing=row;opener=row.querySelector('.rule-edit');
+    document.getElementById('ruleEditTitle').textContent=row.dataset.category?'Edit rule':'Add rule';
+    document.getElementById('ruleEditKey').textContent=row.dataset.key+' · '+(row.dataset.category?`${row.dataset.category} / ${row.dataset.subcategory} (${row.dataset.enabled==='true'?'enabled':'disabled'})`:'No rule');
+    category.replaceChildren(new Option('— Select —',''));
+    Object.keys(definitions).sort().forEach(name=>category.add(new Option(name,name)));
+    const proposed=suggestion?suggestion.proposal:row.dataset;
+    category.value=proposed&&Object.hasOwn(definitions,proposed.category)?proposed.category:'';
+    populate(proposed?proposed.subcategory:'');state.value=row.dataset.enabled;
+    mode.value='category';mode.disabled=!row.dataset.category;showMode();
+    if(suggestion){
+      const evidence=suggestion.assignments.map(item=>`${item.category||'Uncategorised'}${item.subcategory?' / '+item.subcategory:''} (${item.count})${item.valid?'':' — missing or obsolete'}`);
+      document.getElementById('ruleEditHint').textContent='New rules start enabled. '+suggestion.explanation+' '+(evidence.length?evidence.join('; '):'No historical matches remain.');
+    }
+    edit.showModal();
+  }
+  function bindRows(){document.querySelectorAll('.rule-row').forEach(row=>{
+    row.querySelector('.rule-edit')?.addEventListener('click',()=>openEdit(row));
+    row.querySelector('.rule-inspect')?.addEventListener('click',async()=>{
       if(busy)return;
       busy=true;status.textContent='';
       try {
@@ -117,4 +161,19 @@
       finally {busy=false;}
     });
   });
+  }
+  bindRows();
+  // A filter is not an action. Consume an explicit intent before any async work.
+  if(window.location.search){
+    const params=new URLSearchParams(window.location.search);
+    if(params.has('intent')){
+      const valid=params.getAll('intent').length===1&&params.get('intent')==='add_rule'&&params.getAll('key').length===1;
+      const key=params.get('key');
+      const url=new URL(window.location.href);url.searchParams.delete('intent');
+      window.history.replaceState(window.history.state,'',url);
+      const row=valid?Array.from(document.querySelectorAll('.rule-row')).find(item=>item.dataset.key===key&&!item.dataset.category):null;
+      if(row)openEdit(row);
+      else status.textContent='This exact suggestion is no longer available. Find the merchant and review its current rule.';
+    }
+  }
 })();

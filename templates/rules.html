@@ -1,35 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Rules — Ledger Dashboard{% endblock %}
 {% block content %}
-<style>
-#rulesTable,#suggestionsTable {table-layout:fixed;width:100%} #rulesTable th,#rulesTable td,#suggestionsTable th,#suggestionsTable td {overflow-wrap:anywhere}
-#rulesTable th .btn,#suggestionsTable th .btn {white-space:normal;text-align:left}
-.rule-row-actions .btn {display:block;margin:0 0 6px;white-space:normal}
-.rule-dialog {box-sizing:border-box;background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:12px;padding:24px;width:min(600px,94vw);max-height:85vh;overflow:auto}
-.rule-fields {display:grid;grid-template-columns:1fr 1fr;gap:12px} .rule-fields label {display:flex;flex-direction:column;min-width:0}
-.rule-fields[hidden] {display:none}
-#ruleEdit,#ruleInspect,#rulePreview {margin:auto}
-.rule-fields select {width:100%;min-width:0} .rule-dialog-actions {display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-@media(max-width:600px){.rule-fields{grid-template-columns:1fr} #rulesTable th,#rulesTable td{padding:6px 3px;font-size:12px} #rulesTable .btn{padding:5px 3px;font-size:12px} .rule-dialog{padding:16px}}
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='rules.css') }}">
 <h1>Rules</h1>
-<p class="subtitle">Future imports only. Editing or disabling a rule never changes historical assignments. Exact uppercase normalised merchant keys; channels are not matching conditions.</p>
-<form method="get" action="/rules" class="card">
+<p class="subtitle">Choose how future imports are categorised. Saved transactions stay unchanged.</p>
+<form method="get" action="/rules" class="card rules-filters">
   <label>Review account <select id="rulesAccount" name="account_id" data-applied="{{ account_id }}"><option value="">All accounts</option>{% for account in accounts %}<option value="{{ account.account_id }}"{% if account.account_id == account_id %} selected{% endif %}>{{ account.display_name }}</option>{% endfor %}</select></label>
   <label>Find merchant or category <input type="text" name="q" value="{{ query }}"></label>
   <button class="btn btn-primary" type="submit">Find</button> <a class="btn" href="/rules">Clear</a> <a href="/exceptions">Exceptions</a>
 </form>
 {% if error %}<p class="alert alert-error">{{ error }}</p>{% endif %}
-<p class="muted">Account selection filters this review only. Rules are shared: edits affect future matches across all accounts. Confirmation always shows all-account evidence. All accounts includes rules with no historical matches; a selected account shows only keys with historical matches there.</p>
-<p id="rulesStatus" role="status" aria-live="polite"></p>
-<details id="savedRules" class="card"{% if query and entries %} open{% endif %}>
-<summary>Saved rules ({{ entries|length }})</summary>
+<p class="muted">Showing matches for your filters. Rules apply to future imports across all accounts.</p>
+<p id="rulesStatus" tabindex="-1" role="status" aria-live="polite"></p>
+{% if entries %}<details id="savedRules" class="card"{% if query and entries %} open{% endif %}>
+<summary>Saved rules ({{ entries|length }}) — in this view</summary>
 <div style="overflow:auto">
 <table id="rulesTable"><thead><tr>
-<th aria-sort="none"><button type="button" data-sort="key" class="btn btn-sm">Merchant / exact matching key</button></th>
-<th aria-sort="none"><button type="button" data-sort="category" class="btn btn-sm">Category</button></th>
-<th aria-sort="none"><button type="button" data-sort="subcategory" class="btn btn-sm">Subcategory</button></th>
-<th aria-sort="none"><button type="button" data-sort="state" class="btn btn-sm">Enabled status</button></th>
+<th aria-sort="none"><button type="button" data-sort="key" class="rule-sort">Merchant</button></th>
+<th aria-sort="none"><button type="button" data-sort="category" class="rule-sort">Category</button></th>
+<th aria-sort="none"><button type="button" data-sort="subcategory" class="rule-sort">Subcategory</button></th>
+<th aria-sort="none"><button type="button" data-sort="state" class="rule-sort">Status</button></th>
 <th>Actions</th></tr></thead><tbody id="rulesBody">
 {% for entry in entries %}
 <tr class="rule-row" data-key="{{ entry.key }}" data-state="{{ 'Enabled' if entry.rule.enabled else 'Disabled' }}" data-enabled="{{ 'true' if entry.rule and entry.rule.enabled else 'false' }}" data-category="{{ entry.rule.category if entry.rule else '' }}" data-subcategory="{{ entry.rule.subcategory if entry.rule else '' }}">
@@ -43,16 +33,16 @@
 {% else %}<tr><td colspan="5">No saved rules match this view.</td></tr>{% endfor %}
 </tbody></table>
 </div>
-</details>
-<details id="ruleSuggestions" class="card"{% if query and suggestions %} open{% endif %}>
-<summary>Suggested rules ({{ suggestions|length }})</summary>
+</details>{% endif %}
+{% if suggestions %}<details id="ruleSuggestions" class="card"{% if query and suggestions %} open{% endif %}>
+<summary>Suggested rules ({{ suggestions|length }}) — in this view</summary>
 {% if suggestions and suggestions|sum(attribute='uncategorised_count') == 0 %}
 <p class="muted">Optional: these transactions are already categorised; add a rule only if future matches should use the same category.</p>
 {% else %}<p class="muted">Future rules are optional and separate from transaction categorisation. Where a saved category is missing, categorise those transactions first; adding a rule would not categorise them.</p>{% endif %}
-<p class="muted">Saved transaction categories are shown below, not future rules. Counts are transactions in this view. Nothing is learned or saved automatically.</p>
+<p class="muted">Review a suggestion before adding it. Counts show saved transactions in this view.</p>
 <div style="overflow:auto"><table id="suggestionsTable"><thead><tr>
-<th aria-sort="none"><button type="button" data-sort="key" class="btn btn-sm">Merchant / exact matching key</button></th>
-<th aria-sort="none"><button type="button" data-sort="category" class="btn btn-sm">Saved category / subcategory</button></th>
+<th aria-sort="none"><button type="button" data-sort="key" class="rule-sort">Merchant</button></th>
+<th aria-sort="none"><button type="button" data-sort="category" class="rule-sort">Saved category / subcategory</button></th>
 <th>Actions</th></tr></thead><tbody id="suggestionsBody">
 {% for entry in suggestions %}
 <tr class="rule-row" data-key="{{ entry.key }}" data-enabled="false" data-category="" data-subcategory="" data-sort-category="{% for saved in entry.saved %}{{ saved.category }} / {{ saved.subcategory }}{% if not loop.last %}; {% endif %}{% endfor %}">
@@ -62,29 +52,19 @@
 </tr>
 {% else %}<tr><td colspan="3">No suggestions match this view.</td></tr>{% endfor %}
 </tbody></table></div>
-</details>
-<dialog id="ruleEdit" aria-labelledby="ruleEditTitle" aria-describedby="ruleEditHelp" class="rule-dialog">
-<h2 id="ruleEditTitle">Edit rule</h2><p id="ruleEditKey" style="overflow-wrap:anywhere"></p>
-<p id="ruleEditHelp">Changes apply to future imports across all accounts. Historical transactions stay unchanged. Nothing is saved until you confirm.</p>
-<label>Change <select id="ruleEditMode"><option value="category">Category / subcategory</option><option value="state">Enabled / disabled</option></select></label>
-<div id="ruleEditCategories" class="rule-fields">
-<label for="ruleEditCategory">Category<select id="ruleEditCategory"></select></label>
-<label for="ruleEditSubcategory">Subcategory<select id="ruleEditSubcategory"></select></label>
-</div>
-<div id="ruleEditStateField"><label for="ruleEditState">Rule status<select id="ruleEditState"><option value="true">Enabled</option><option value="false">Disabled</option></select></label></div>
-<p id="ruleEditHint" class="muted"></p><p id="ruleEditStatus" role="status" aria-live="polite"></p>
-<div class="rule-dialog-actions"><button id="ruleEditCancel" type="button" class="btn">Cancel</button><button id="ruleEditSave" type="button" class="btn btn-primary">Save changes</button></div>
-</dialog>
+</details>{% endif %}
+{% if not entries and not suggestions %}<p class="card">No rules or suggestions match these filters.</p>{% endif %}
+{% include '_rule_edit.html' %}
 <dialog id="ruleInspect" aria-labelledby="ruleInspectTitle" style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:12px;padding:24px;width:min(700px,90vw);max-height:85vh;overflow:auto">
 <h2 id="ruleInspectTitle">Rule details</h2><p id="ruleInspectKey" style="overflow-wrap:anywhere"></p>
 <h3>Historical exact matches (view only)</h3>
 <p class="muted">Matches follow the account filter above; history and rule edits remain shared across all accounts.</p>
 <div style="max-height:260px;overflow:auto"><table id="ruleMatchesTable"><thead><tr><th>Transaction ID</th>
-<th aria-sort="none"><button type="button" data-sort="date" class="btn btn-sm">Date</button></th>
-<th aria-sort="none"><button type="button" data-sort="description" class="btn btn-sm">Description</button></th>
-<th aria-sort="none"><button type="button" data-sort="category" class="btn btn-sm">Category</button></th>
-<th aria-sort="none"><button type="button" data-sort="subcategory" class="btn btn-sm">Subcategory</button></th>
-<th aria-sort="none"><button type="button" data-sort="account" class="btn btn-sm">Account</button></th>
+<th aria-sort="none"><button type="button" data-sort="date" class="rule-sort">Date</button></th>
+<th aria-sort="none"><button type="button" data-sort="description" class="rule-sort">Description</button></th>
+<th aria-sort="none"><button type="button" data-sort="category" class="rule-sort">Category</button></th>
+<th aria-sort="none"><button type="button" data-sort="subcategory" class="rule-sort">Subcategory</button></th>
+<th aria-sort="none"><button type="button" data-sort="account" class="rule-sort">Account</button></th>
 </tr></thead><tbody id="ruleInspectMatches"></tbody></table></div>
 <h3>Previous rule edits</h3><p class="muted">This log shows edits to the rule. It does not change past transactions.</p><ul id="ruleInspectHistory"></ul>
 <p class="muted">Undo is targeted to this key's latest unchanged edit, not a whole-file restore. Later edits are never overwritten.</p>

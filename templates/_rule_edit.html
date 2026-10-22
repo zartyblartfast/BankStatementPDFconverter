@@ -1,0 +1,12 @@
+<dialog id="ruleEdit" aria-labelledby="ruleEditTitle" aria-describedby="ruleEditHelp" class="rule-dialog">
+<h2 id="ruleEditTitle">Edit rule</h2><p id="ruleEditKey" style="overflow-wrap:anywhere"></p>
+<p id="ruleEditHelp">Changes apply to future imports across all accounts. Historical transactions stay unchanged. Nothing is saved until you confirm.</p>
+<label>Change <select id="ruleEditMode"><option value="category">Category / subcategory</option><option value="state">Enabled / disabled</option></select></label>
+<div id="ruleEditCategories" class="rule-fields">
+<label for="ruleEditCategory">Category<select id="ruleEditCategory"></select></label>
+<label for="ruleEditSubcategory">Subcategory<select id="ruleEditSubcategory"></select></label>
+</div>
+<div id="ruleEditStateField"><label for="ruleEditState">Rule status<select id="ruleEditState"><option value="true">Enabled</option><option value="false">Disabled</option></select></label></div>
+<p id="ruleEditHint" class="muted"></p><p id="ruleEditStatus" role="status" aria-live="polite"></p>
+<div class="rule-dialog-actions"><button id="ruleEditCancel" type="button" class="btn">Cancel</button><button id="ruleEditSave" type="button" class="btn btn-primary">Save changes</button></div>
+</dialog>

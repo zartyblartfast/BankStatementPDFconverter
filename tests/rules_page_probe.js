@@ -25,7 +25,7 @@ class Element{
  await controls['.rule-edit'].emit('click');els.ruleEditMode.value='state';await els.ruleEditMode.emit('change');els.ruleEditState.value='true';await els.ruleEditSave.emit('click');assert.equal(actions[1].enabled,true);assert.equal(actions[1].subcategory,'Old');await els.ruleEditCancel.emit('click');
  await controls['.rule-inspect'].emit('click');assert(els.ruleInspect.open);assert.equal(els.ruleInspectMatches.children[0].children[0].textContent,'9223372036854775807');assert.equal(els.ruleInspectMatches.children[0].children[2].textContent,'<script>literal</script>');
  assert.equal(els.ruleInspectHistory.children[0].children.length,1);assert.equal(els.ruleInspectHistory.children[1].children.length,0);
- result={saved:true};await els.ruleInspectHistory.children[0].children[0].emit('click');await new Promise(r=>setImmediate(r));assert.equal(actions[2].undo_id,'latest');assert.equal(reloads,1);
+ result={saved:true};await els.ruleInspectHistory.children[0].children[0].emit('click');await new Promise(r=>setImmediate(r));assert.equal(actions[2].undo_id,'latest');assert.equal(reloads,0);assert(els.rulesStatus.textContent.startsWith('Rule change saved.'));assert(els.rulesStatus.textContent.includes('Refresh this page to see the updated list.'));
  // An obsolete current destination is not in CAT_TREE. Disable must send
  // the row's exact saved pair, not a dropdown fallback or pending edit.
  row.dataset={key:'SHOP <literal>',category:'Removed',subcategory:'Old',enabled:'true'};

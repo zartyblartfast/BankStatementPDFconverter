@@ -34,6 +34,11 @@ def _definition_digest(tree):
     return hashlib.sha256(json.dumps(tree, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
+def _suggestion_revision(state, tree, evidence):
+    return hashlib.sha256((state['digest'] + _definition_digest(tree) +
+                           review.fingerprint(evidence)).encode('utf-8')).hexdigest()
+
+
 def public_rule(row):
     if row is None:
         return None
@@ -121,10 +126,43 @@ def register_rules(app, dashboard):
         except (ValueError, OSError) as exc:
             return jsonify(ok=False, error=str(exc)), 400 if isinstance(exc, DisplayScopeError) else 409
 
+    @app.get('/api/rules/suggestion')
+    def rule_suggestion():
+        try:
+            if set(request.args) != {'key'} or len(request.args.getlist('key')) != 1:
+                raise ValueError('Choose one exact matching key. Suggestions always use all accounts.')
+            key = request.args['key']
+            if not key or key != store.key(key) or len(key) > 500:
+                raise ValueError('Choose one exact uppercase matching key.')
+            state = store.snapshot(d.RULES_CSV)
+            if key in state['rules']:
+                raise ValueError('A saved rule now exists for this key. Reload Rules to review it.')
+            tree = d._load_cat_tree()
+            with read_ledger(d.DB_PATH) as conn:
+                evidence = review.matches(conn, key) if conn else []
+            grouped = {}
+            for row in evidence:
+                pair = (row['category'] or '', row['subcategory'] or '')
+                grouped[pair] = grouped.get(pair, 0) + 1
+            assignments = [dict(category=cat, subcategory=sub, count=count,
+                                valid=bool(cat and sub and sub in tree.get(cat, [])))
+                           for (cat, sub), count in sorted(grouped.items())]
+            proposal = None
+            if len(assignments) == 1 and assignments[0]['valid']:
+                proposal = {name: assignments[0][name] for name in ('category', 'subcategory')}
+            explanation = ('All historical matches across all accounts use this current category / subcategory. You can edit the proposal.'
+                           if proposal else 'No unanimous current category / subcategory across all accounts. Missing, different or obsolete assignments require an explicit choice.')
+            return jsonify(ok=True, key=key, proposal=proposal, assignments=assignments,
+                           categories=tree, explanation=explanation,
+                           suggestion_revision=_suggestion_revision(state, tree, evidence))
+        except (ValueError, OSError) as exc:
+            return jsonify(ok=False, error=str(exc)), 409
+
     @app.post('/api/rules/preview')
     def rule_preview():
         data = request.get_json(silent=True)
         allowed = ({'key', 'category', 'subcategory', 'enabled'},
+                   {'key', 'category', 'subcategory', 'enabled', 'suggestion_revision'},
                    {'txn_id', 'category', 'subcategory'}, {'exception_id', 'category', 'subcategory'}, {'undo_id'})
         if not isinstance(data, dict) or set(data) not in allowed:
             return jsonify(ok=False, error='Choose a rule action or one saved transaction.'), 400
@@ -173,6 +211,11 @@ def register_rules(app, dashboard):
                     proposed = {name: data[name] for name in ('category', 'subcategory', 'enabled')}
                 if not key or len(key) > 500:
                     raise ValueError('No usable exact merchant key is available.')
+                evidence = review.matches(conn, key) if conn else []
+                if 'suggestion_revision' in data:
+                    if (key in state['rules'] or not isinstance(data['suggestion_revision'], str) or
+                            data['suggestion_revision'] != _suggestion_revision(state, tree, evidence)):
+                        raise ValueError('Suggestion evidence or configuration changed. Reopen the suggestion before choosing a category.')
                 if proposed is not None:
                     category, subcategory = proposed['category'], proposed['subcategory']
                     current = state['rules'].get(key)
@@ -184,7 +227,6 @@ def register_rules(app, dashboard):
                         raise ValueError('Disable must retain the exact existing rule destination.')
                     if not retain_disabled and (not isinstance(category, str) or not isinstance(subcategory, str) or subcategory not in tree.get(category, [])):
                         raise ValueError('Choose an existing Category / Subcategory.')
-                evidence = review.matches(conn, key) if conn else []
                 if not future and undo_id is None and key not in state['rules'] and not evidence:
                     raise ValueError('Choose an existing rule or a key needing review.')
             old = public_rule(state['rules'].get(key))

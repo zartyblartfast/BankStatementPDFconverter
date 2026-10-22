@@ -144,7 +144,7 @@ class RulesDisplayTests(DashboardFixture):
         self.assertIn('Uncategorised (2)', html)
         self.assertIn('Categorise transactions first', html)
         self.assertNotIn('>Add rule</button>', html)
-        self.assertNotIn('data-key="SYNTHETIC"', html.split('<tbody id="rulesBody">')[1].split('</tbody>')[0])
+        self.assertNotIn('id="rulesBody"', html)
         self.categorise_fixture()
         with closing(sqlite3.connect(self.paths.db_path)) as conn, conn:
             conn.execute("UPDATE transactions SET subcategory_id=NULL WHERE account_id='BETA'")
@@ -209,11 +209,11 @@ class RulesDisplayTests(DashboardFixture):
         self.assertIn('data-key="SYNTHETIC"', saved)
         self.assertIn('>Disabled</td>', saved)
         self.assertIn('>Edit rule</button>', saved)
-        self.assertIn('Suggested rules (0)', html)
+        self.assertNotIn('id="ruleSuggestions"', html)
         self.paths.category_rules_path.write_text('merchant_core,pattern,category,subcategory,notes\nSYNTHETIC,,Other,Alternative,\n')
         html = self.get('/rules').get_data(as_text=True)
         self.assertIn('2 saved transactions use a different category. This can be intentional', html)
-        self.assertIn('Suggested rules (0)', html)
+        self.assertNotIn('id="ruleSuggestions"', html)
         self.assertIn('Open transaction exceptions: 0', self.get('/exceptions').get_data(as_text=True))
 
     def test_real_javascript_controller(self):

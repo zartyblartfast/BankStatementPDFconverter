@@ -102,22 +102,22 @@
   </table>
 </div>
 {% else %}
-<div class="card" style="text-align:center; padding:40px;">
-  <div style="font-size:2rem; margin-bottom:8px;">✓</div>
-  <div style="color:#22c55e; font-size:1.1rem; font-weight:600;">All Clear</div>
-  <div class="muted" style="margin-top:4px;">No open transaction exceptions</div>
-</div>
+<p class="card">No transactions need categorising.</p>
 {% endif %}
-<section aria-labelledby="rulesReviewTitle" class="card">
-<h2 id="rulesReviewTitle">Optional rule review ({{ rule_candidates|length }})</h2>
-<p class="muted">These are not open transaction exceptions. Future rules are optional; disabled rules and different saved categories can be intentional. Rule edits never change saved transactions. Nothing is changed automatically.</p>
+<section aria-labelledby="rulesReviewTitle" class="card rule-review">
+<h2 id="rulesReviewTitle" tabindex="-1">Optional rule review ({{ rule_candidates|length }})</h2>
+<p class="muted">These are not open transaction exceptions. Add optional rules for future imports; saved transactions stay unchanged.</p>
 <p><a class="btn btn-sm" href="/rules">Find / manage rules</a></p>
 {% if rule_review_error %}<p class="alert alert-error">{{ rule_review_error }}</p>{% endif %}
-<table><thead><tr><th>Exact normalised key</th><th>Review / transaction count</th><th>Saved assignments</th><th>Future rule</th><th></th></tr></thead><tbody>
-{% for candidate in rule_candidates %}<tr><td>{{ candidate.key }}</td><td>{% if candidate.reason == 'missing' %}Optional future rule{% elif candidate.reason == 'disabled' %}Saved rule is disabled{% else %}Saved categories differ from rule{% endif %} · {{ candidate.count }}</td><td>{% for saved in candidate.saved %}{{ saved.category }}{% if saved.subcategory %} / {{ saved.subcategory }}{% endif %} ({{ saved.count }}){% if not loop.last %}; {% endif %}{% endfor %}</td><td>{% if candidate.rule %}{{ candidate.rule.category }} / {{ candidate.rule.subcategory }}{% else %}Not added{% endif %}</td><td><a href="{{ url_for('rules_page',key=candidate.key) }}">{{ 'View saved rule' if candidate.rule else 'View suggestion' }}</a>{% if candidate.uncategorised_count %}<div class="muted">Categorise transactions first: {{ candidate.uncategorised_count }} without a saved category. Adding a rule would not categorise them.</div>{% endif %}</td></tr>
+<p id="rulesStatus" role="status" aria-live="polite" tabindex="-1"></p>
+{% if rule_candidates %}<div id="exceptionRulesTable" style="overflow:auto"><table><thead><tr><th>Merchant</th><th>Review / transaction count</th><th>Saved assignments</th><th>Future rule</th><th></th></tr></thead><tbody>
+{% for candidate in rule_candidates %}<tr class="rule-row" data-key="{{ candidate.key }}" data-category="" data-subcategory="" data-enabled="false"><td>{{ candidate.key }}</td><td>{% if candidate.reason == 'missing' %}Optional future rule{% elif candidate.reason == 'disabled' %}Saved rule is disabled{% else %}Saved categories differ from rule{% endif %} · {{ candidate.count }}</td><td>{% for saved in candidate.saved %}{{ saved.category }}{% if saved.subcategory %} / {{ saved.subcategory }}{% endif %} ({{ saved.count }}){% if not loop.last %}; {% endif %}{% endfor %}</td><td>{% if candidate.rule %}{{ candidate.rule.category }} / {{ candidate.rule.subcategory }}{% else %}Not added{% endif %}</td><td>{% if candidate.rule %}<a href="{{ url_for('rules_page',key=candidate.key) }}">View saved rule</a>{% else %}<button type="button" class="rule-edit btn btn-sm">View suggestion</button>{% endif %}{% if candidate.uncategorised_count %}<div class="muted">Categorise transactions first: {{ candidate.uncategorised_count }} without a saved category. Adding a rule would not categorise them.</div>{% endif %}</td></tr>
 {% else %}<tr><td colspan="5">No optional rule review items.</td></tr>{% endfor %}
-</tbody></table>
+</tbody></table></div>{% endif %}
+<p id="rulesAllDone"{% if rule_candidates or rule_review_error %} hidden{% endif %}>All done — no optional rules to review.</p>
 </section>
+<link rel="stylesheet" href="{{ url_for('static', filename='rules.css') }}">
+{% include '_rule_edit.html' %}
 {% endblock %}
 
 {% block extra_js %}
@@ -221,4 +221,5 @@ if (document.getElementById('batchApply')) {
 </script>
 <script src="{{ url_for('static', filename='category_manager.js') }}"></script>
 <script src="{{ url_for('static', filename='exception_corrections.js') }}"></script>
+<script src="{{ url_for('static', filename='rules.js') }}"></script>
 {% endblock %}
